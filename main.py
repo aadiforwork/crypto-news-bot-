@@ -12,7 +12,7 @@ FREE LLM Providers (no credit card needed):
     1. Google Gemini API (gemini-3.5-flash-lite) - FREE tier
        Get key: https://aistudio.google.com/apikey
     
-    2. Groq API (llama-3.1-8b-instant) - FREE tier, very fast
+    2. Groq API (openai/gpt-oss-20b) - FREE tier, very fast
        Get key: https://console.groq.com/keys
     
     3. OpenRouter (meta/muse-spark-1.3) - Needs credits but extremely cheap
@@ -66,7 +66,7 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
 
 # Model selection per provider
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "meta/muse-spark-1.3")
 
 # API Endpoints
@@ -445,7 +445,7 @@ STRICT FILTERING RULES:
    ✅ Whale movements ($50M+), institutional adoption
    ✅ Stablecoin depegs, major liquidations
 
-3. REJECT (reply exactly "SKIP"):
+3. REJECT (reply with exactly this JSON and nothing else: {"response": "SKIP"}):
    ❌ Price predictions, technical analysis, "Bitcoin to $100k"
    ❌ Minor altcoin pumps/dumps (< $50M volume)
    ❌ Routine exchange listings/delistings
@@ -469,7 +469,7 @@ STRICT FILTERING RULES:
      "source_name": "Source name from input"
    }
 
-Be ruthless. If unsure, reply SKIP."""
+Be ruthless. If unsure, reply {"response": "SKIP"}."""
 
 
 def validate_env() -> bool:
@@ -766,7 +766,7 @@ def _analyze_with_groq(user_content: str) -> Optional[Dict[str, Any]]:
             {"role": "user", "content": user_content}
         ],
         "temperature": 0.1,
-        "max_tokens": 500,
+        "max_tokens": 1000,
         "response_format": {"type": "json_object"}
     }
     
