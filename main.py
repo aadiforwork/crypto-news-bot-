@@ -9,7 +9,7 @@ Usage:
     python main.py --once       # Run one cycle and exit (good for cron)
 
 FREE LLM Providers (no credit card needed):
-    1. Google Gemini API (gemini-1.5-flash) - 1500 req/day FREE
+    1. Google Gemini API (gemini-3.5-flash-lite) - FREE tier
        Get key: https://aistudio.google.com/apikey
     
     2. Groq API (llama-3.1-8b-instant) - FREE tier, very fast
@@ -65,7 +65,7 @@ OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
 
 # Model selection per provider
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "meta/muse-spark-1.3")
 
@@ -75,14 +75,12 @@ GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_M
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-# RSS Feed Sources
+# RSS Feed Sources - ONLY top-tier genuine outlets (no clickbait / spam feeds)
 CRYPTO_RSS_FEEDS = [
-    {"name": "CoinTelegraph", "url": "https://cointelegraph.com/rss"},
     {"name": "CoinDesk", "url": "https://www.coindesk.com/arc/outboundfeeds/rss"},
-    {"name": "Decrypt", "url": "https://decrypt.co/feed"},
-    {"name": "CryptoSlate", "url": "https://cryptoslate.com/feed/"},
+    {"name": "CoinTelegraph", "url": "https://cointelegraph.com/rss"},
     {"name": "The Block", "url": "https://www.theblock.co/rss.xml"},
-    {"name": "WatcherGuru", "url": "https://watcher.guru/feed"},
+    {"name": "Decrypt", "url": "https://decrypt.co/feed"},
     {"name": "BitcoinMag", "url": "https://bitcoinmagazine.com/feed"},
 ]
 
@@ -315,9 +313,9 @@ def mock_analyze_with_llm(title: str, description: str, source: str) -> Optional
                        "indictment", "charged", "charges", "guilty", "jailed", "prison",
                        "fraud", "scam", "scams", "celsius",
                        "ban", "banned", "bans", "seize", "seized", "seizure",
-                       "license", "licensed", "licence", "approval", "approvals", "approve", "approved",
+                       "license", "licensed", "licence",
                        "tax", "taxes", "taxation", "stablecoin", "stablecoins",
-                       "propose", "proposes", "attorney"],
+                       "attorney"],
         "Macro": ["fomc", "federal reserve", "fed rate", "interest rate", "rate cut", "rate hike",
                   "cpi", "inflation", "non-farm", "nfp", "payrolls", "unemployment",
                   "gdp", "pce", "retail sales", "ism", "pmi", "jobless claims", "jolts",
