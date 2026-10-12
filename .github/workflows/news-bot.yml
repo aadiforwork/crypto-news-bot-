@@ -1,0 +1,45 @@
+name: Crypto News Bot
+
+on:
+  schedule:
+    # Every 15 minutes (free tier safe: ~700 min/month of 2000 free)
+    - cron: "*/15 * * * *"
+  workflow_dispatch:  # Manual run button
+
+concurrency:
+  group: crypto-news-bot
+  cancel-in-progress: true
+
+permissions:
+  contents: write  # Needed to save processed.json back to repo
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run bot (one cycle)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          LLM_PROVIDER: local
+        run: python main.py --local --once
+
+      - name: Save processed state (no resends next run)
+        run: |
+          git config user.name "news-bot"
+          git config user.email "news-bot@users.noreply.github.com"
+          git add processed.json || true
+          git diff --staged --quiet || git commit -m "Update processed state [skip ci]"
+          git push || echo "Nothing to push"

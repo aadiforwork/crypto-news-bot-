@@ -1,0 +1,14 @@
+# Secrets - NEVER commit these
+.env
+.env.backup
+*.log
+logs/
+
+# Bot state (handled by workflow, but keep local copy safe)
+# NOTE: processed.json IS committed by GitHub Actions (no secrets in it)
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
