@@ -433,12 +433,16 @@ STRICT FILTERING RULES:
    - Cryptocurrency, Web3, Blockchain, DeFi, NFTs
    - Macro economics impacting Bitcoin/Crypto (Fed rates, inflation, USD)
    - Crypto Regulation (SEC, CFTC, Global regulators)
+   - US crypto politics (Congress bills, White House crypto orders/policy)
+   - Indian govt crypto moves (RBI, Finance Ministry, FIU-IND, crypto tax, CBDC)
    - Major Exchange news (Binance, Coinbase, Kraken, etc.)
 
 2. HIGH-IMPACT ONLY: Accept ONLY events that MOVE MARKETS:
    ✅ ETF approvals/rejections/flows
    ✅ Exchange hacks, insolvency, major outages
    ✅ Government regulation/legislation (MiCA, US bills, CBDC)
+   ✅ US Congress crypto bills, White House crypto policy/orders
+   ✅ Indian govt: RBI digital rupee/CBDC, crypto tax changes, FIU/exchange action
    ✅ Fed rate decisions, CPI, major macro data
    ✅ High-profile tweets: Trump, Musk, SEC Chair, Powell, SBF, CZ, Vitalik
    ✅ Trump / White House / Fed statements WITH market mechanism
@@ -780,21 +784,27 @@ def _analyze_with_groq(user_content: str) -> Optional[Dict[str, Any]]:
     }
     
     try:
-        response = requests.post(GROQ_URL, json=payload, headers=headers, timeout=30)
-        response.raise_for_status()
-        result = response.json()
-        
-        content = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
-        
-        return _parse_llm_response(content)
-        
-    except requests.exceptions.Timeout:
-        logger.warning("Groq API timeout")
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Groq API error: {e}")
+        last_err = None
+        for attempt in range(2):  # Retry once: Groq sometimes fails JSON validation transiently
+            try:
+                response = requests.post(GROQ_URL, json=payload, headers=headers, timeout=30)
+                response.raise_for_status()
+                result = response.json()
+
+                content = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+
+                return _parse_llm_response(content)
+
+            except requests.exceptions.Timeout:
+                last_err = "timeout"
+                logger.warning("Groq API timeout (attempt %d)", attempt + 1)
+            except requests.exceptions.RequestException as e:
+                last_err = str(e)
+                logger.warning("Groq API error (attempt %d): %s", attempt + 1, e)
+        logger.error("Groq failed after 2 attempts: %s", last_err)
     except Exception as e:
         logger.error(f"Groq analysis error: {e}")
-    
+
     return None
 
 
