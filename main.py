@@ -441,6 +441,10 @@ STRICT FILTERING RULES:
    ✅ Government regulation/legislation (MiCA, US bills, CBDC)
    ✅ Fed rate decisions, CPI, major macro data
    ✅ High-profile tweets: Trump, Musk, SEC Chair, Powell, SBF, CZ, Vitalik
+   ✅ Trump / White House / Fed statements WITH market mechanism
+      (tariffs, rate pressure, dollar, crypto policy, BTC reserve, taxes on crypto).
+      Pure election-campaign promises with NO market mechanism (rally speeches,
+      vote appeals, "pocket me paise" claims) = SKIP.
    ✅ Major protocol upgrades/forks/exploits ($100M+)
    ✅ Whale movements ($50M+), institutional adoption
    ✅ Stablecoin depegs, major liquidations
