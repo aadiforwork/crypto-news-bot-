@@ -795,7 +795,12 @@ def _analyze_with_groq(user_content: str) -> Optional[Dict[str, Any]]:
 
                 content = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
 
-                return _parse_llm_response(content)
+                try:
+                    return _parse_llm_response(content)
+                except (ValueError, KeyError, AttributeError) as e:
+                    # Model answered but output unusable - burn it, don't retry forever
+                    logger.warning("Groq bad response structure, skipping: %s", e)
+                    return None
 
             except requests.exceptions.Timeout:
                 last_err = "timeout"
@@ -804,10 +809,11 @@ def _analyze_with_groq(user_content: str) -> Optional[Dict[str, Any]]:
                 last_err = str(e)
                 logger.warning("Groq API error (attempt %d): %s", attempt + 1, e)
         logger.error("Groq failed after 2 attempts: %s", last_err)
+        return {"__api_error__": True}  # Transport failure, NOT a verdict - caller must retry later
     except Exception as e:
         logger.error(f"Groq analysis error: {e}")
 
-    return None
+    return {"__api_error__": True}
 
 
 def _analyze_with_openrouter(user_content: str) -> Optional[Dict[str, Any]]:
@@ -1031,7 +1037,12 @@ def process_news_item(item: Dict[str, Any]) -> bool:
     
     # Analyze with LLM
     analysis = analyze_with_llm(title, description, source)
-    
+
+    # API transport failure (NOT a verdict): retry next cycle, do NOT burn the hash
+    if isinstance(analysis, dict) and analysis.get("__api_error__"):
+        logger.warning(f"{LOG_WARN} LLM API failed, will retry next cycle: {title[:70]}...")
+        return False
+
     if analysis is None:
         logger.info(f"{LOG_SKIP} Skipped (filtered by LLM)")
         processed_hashes.add(item_hash)
