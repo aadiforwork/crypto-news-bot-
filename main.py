@@ -82,6 +82,8 @@ CRYPTO_RSS_FEEDS = [
     {"name": "The Block", "url": "https://www.theblock.co/rss.xml"},
     {"name": "Decrypt", "url": "https://decrypt.co/feed"},
     {"name": "BitcoinMag", "url": "https://bitcoinmagazine.com/feed"},
+    {"name": "CryptoBriefing", "url": "https://cryptobriefing.com/feed/"},
+    {"name": "BitcoinCom", "url": "https://news.bitcoin.com/feed/"},
 ]
 
 # Forex Factory Economic Calendar (High-Impact USD events only)
