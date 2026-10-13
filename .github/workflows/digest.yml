@@ -1,0 +1,48 @@
+name: Daily Big Headline (10 AM IST)
+
+on:
+  schedule:
+    # 04:30 UTC = 10:00 IST, once daily
+    - cron: "30 4 * * *"
+  workflow_dispatch:  # Manual run button
+
+concurrency:
+  group: crypto-news-digest
+  cancel-in-progress: true
+
+permissions:
+  contents: write  # Needed to save digest state back to repo
+
+jobs:
+  run-digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Post big headline of last 24h
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          LLM_PROVIDER: groq
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_MODEL: openai/gpt-oss-20b
+        run: python main.py --digest
+
+      - name: Save digest state
+        run: |
+          git config user.name "news-bot"
+          git config user.email "news-bot@users.noreply.github.com"
+          git pull --rebase --autostash || true
+          git add processed.json || true
+          git diff --staged --quiet || git commit -m "Update digest state [skip ci]"
+          git push || echo "Nothing to push"

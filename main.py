@@ -42,11 +42,13 @@ parser = argparse.ArgumentParser(description="Crypto AI News Bot")
 parser.add_argument("--dry-run", action="store_true", help="Test mode: fetch + analyze + print (no API keys needed)")
 parser.add_argument("--once", action="store_true", help="Run one polling cycle and exit")
 parser.add_argument("--local", action="store_true", help="Local mode: keyword-based Hinglish analysis + REAL Telegram sending (no LLM API needed)")
+parser.add_argument("--digest", action="store_true", help="Digest mode: post BIG HEADLINE of last 24h (runs once daily)")
 args = parser.parse_args()
 
 DRY_RUN = args.dry_run
 RUN_ONCE = args.once
 LOCAL_MODE = args.local
+DIGEST_MODE = args.digest
 
 # ==================== CONFIGURATION ====================
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -153,10 +155,13 @@ macro_event_cache: Dict[str, datetime] = {}
 # Persistent storage file for processed hashes (survives restarts)
 PROCESSED_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "processed.json")
 
+# Last date (IST) on which the daily digest was posted (prevents double-posts)
+LAST_DIGEST = ""
+
 
 def load_processed_hashes() -> None:
     """Load previously processed hashes + story fingerprints from disk."""
-    global processed_hashes, processed_stories
+    global processed_hashes, processed_stories, LAST_DIGEST
     try:
         if os.path.exists(PROCESSED_FILE):
             with open(PROCESSED_FILE, "r", encoding="utf-8") as f:
@@ -169,6 +174,7 @@ def load_processed_hashes() -> None:
                     # New format: hashes + story fingerprints
                     processed_hashes = set(data.get("hashes", []))
                     processed_stories = [frozenset(s) for s in data.get("stories", [])]
+                    LAST_DIGEST = data.get("last_digest", "")
                     logger.info(f"{LOG_BOT} Loaded {len(processed_hashes)} hashes + {len(processed_stories)} stories from disk")
     except Exception as e:
         logger.warning(f"Could not load processed hashes: {e}")
@@ -180,7 +186,8 @@ def save_processed_hashes() -> None:
         with open(PROCESSED_FILE, "w", encoding="utf-8") as f:
             json.dump({
                 "hashes": sorted(processed_hashes),
-                "stories": [sorted(s) for s in processed_stories[-2000:]]
+                "stories": [sorted(s) for s in processed_stories[-2000:]],
+                "last_digest": LAST_DIGEST
             }, f)
     except Exception as e:
         logger.warning(f"Could not save processed hashes: {e}")
@@ -532,15 +539,19 @@ def generate_item_hash(title: str, url: str) -> str:
     return hashlib.md5(content.encode()).hexdigest()[:16]
 
 
-def fetch_rss_feed(feed_info: Dict[str, str]) -> List[Dict[str, Any]]:
-    """Fetch and parse a single RSS feed. ONLY today's news (strict current-date filter)."""
+def fetch_rss_feed(feed_info: Dict[str, str], since_hours: Optional[float] = None) -> List[Dict[str, Any]]:
+    """Fetch and parse a single RSS feed. ONLY today's news (strict current-date filter).
+    If since_hours is set, accept items published within the last N hours instead."""
     name = feed_info["name"]
     url = feed_info["url"]
     items = []
     skipped_old = 0
-    
+
     # Current date (local) - only news published TODAY is accepted
     today = datetime.now().date()
+    cutoff = None
+    if since_hours is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
     
     try:
         logger.debug(f"Fetching RSS: {name} - {url}")
@@ -558,12 +569,18 @@ def fetch_rss_feed(feed_info: Dict[str, str]) -> List[Dict[str, Any]]:
             if not title or not link:
                 continue
             
-            # STRICT CURRENT-DATE FILTER: skip anything not published today
+            # DATE FILTER: last-N-hours window (digest) or strict today-only (normal)
             pub_parsed = entry.get("published_parsed") or entry.get("updated_parsed")
+            pub_dt_utc = None
             if pub_parsed:
                 try:
-                    pub_date = datetime(*pub_parsed[:6]).date()
-                    if pub_date != today:
+                    # published_parsed is UTC when feed gives timezone-aware dates
+                    pub_dt_utc = datetime(*pub_parsed[:6], tzinfo=timezone.utc)
+                    if cutoff is not None:
+                        if pub_dt_utc < cutoff:
+                            skipped_old += 1
+                            continue
+                    elif pub_dt_utc.date() != today:
                         skipped_old += 1
                         continue  # Not today's news - skip (no kal/parson/month purani)
                 except Exception:
@@ -580,6 +597,7 @@ def fetch_rss_feed(feed_info: Dict[str, str]) -> List[Dict[str, Any]]:
                 "url": link,
                 "source": name,
                 "published": published,
+                "published_ts": pub_dt_utc.timestamp() if pub_dt_utc else 0,
                 "type": "crypto_news"
             })
         
@@ -807,7 +825,12 @@ def _analyze_with_groq(user_content: str) -> Optional[Dict[str, Any]]:
                 logger.warning("Groq API timeout (attempt %d)", attempt + 1)
             except requests.exceptions.RequestException as e:
                 last_err = str(e)
-                logger.warning("Groq API error (attempt %d): %s", attempt + 1, e)
+                status = getattr(getattr(e, "response", None), "status_code", None)
+                if status == 429 and attempt == 0:
+                    logger.warning("Groq rate-limited, cooling down 30s before retry")
+                    time.sleep(30)
+                else:
+                    logger.warning("Groq API error (attempt %d): %s", attempt + 1, e)
         logger.error("Groq failed after 2 attempts: %s", last_err)
         return {"__api_error__": True}  # Transport failure, NOT a verdict - caller must retry later
     except Exception as e:
@@ -1096,6 +1119,194 @@ def cleanup_old_data(max_hashes: int = 5000, max_cache_age_hours: int = 48):
         logger.info(f"{LOG_CLEAN} Cleaned up {len(old_keys)} old macro cache entries")
 
 
+def format_digest_message(top: Dict[str, Any], runners_up: List[Dict[str, Any]]) -> str:
+    """Format the daily BIG HEADLINE digest message in Hinglish."""
+    analysis = top["analysis"]
+    category = analysis.get("category", "NEWS")
+    headline = analysis.get("headline", "Breaking News")
+    summary = analysis.get("summary", [])
+    impact = analysis.get("impact", "HIGH")
+    source_name = analysis.get("source_name", top["item"].get("source", "Unknown"))
+    url = top["item"].get("url", "")
+    original_title = top["item"].get("title", "")
+
+    impact_emoji = "🔥" if impact == "HIGH" else "⚡"
+    summary_text = "\n".join([f"• {point}" for point in summary[:3]])
+    outlets = top["outlets"]
+    outlet_line = f"({outlets} outlets ne cover kiya)" if outlets > 1 else ""
+
+    short_title = original_title.strip()
+    if len(short_title) > 120:
+        short_title = short_title[:117] + "..."
+
+    message = (
+        f"🔥 *BIG HEADLINE — LAST 24 HOURS* {outlet_line}\n"
+        f"📰 _{short_title}_\n"
+        f"📌 *Headline:* {headline}\n"
+        f"💡 *Key Summary:*\n{summary_text}\n"
+        f"📊 *Impact Level:* {impact_emoji} {impact} | *[{category}]*\n"
+        f"🔗 *Source:* [{source_name}]({url})"
+    )
+
+    if runners_up:
+        lines = []
+        for r in runners_up[:2]:
+            t = r["item"].get("title", "").strip()
+            if len(t) > 90:
+                t = t[:87] + "..."
+            lines.append(f"➕ {t}")
+        message += "\n\n*Also big:*\n" + "\n".join(lines)
+
+    return message
+
+
+def run_digest() -> bool:
+    """Post the single biggest crypto story of the last 24h. Returns True if posted."""
+    global LAST_DIGEST
+
+    # IST day (bot's audience timezone)
+    now_utc = datetime.now(timezone.utc)
+    today_ist = (now_utc + timedelta(hours=5, minutes=30)).date().isoformat()
+
+    if LAST_DIGEST == today_ist:
+        logger.info(f"{LOG_BOT} Digest already posted for {today_ist}, skipping")
+        return False
+
+    logger.info(f"{LOG_BOT} Building 24h digest...")
+
+    # Fetch last-24h items from all feeds (no dedup marking here)
+    all_items: List[Dict[str, Any]] = []
+    for feed in CRYPTO_RSS_FEEDS:
+        all_items.extend(fetch_rss_feed(feed, since_hours=24))
+
+    # Skip video/podcast URLs (never headline material)
+    candidates = []
+    for item in all_items:
+        url_lower = item.get("url", "").lower()
+        if "/videos/" in url_lower or "/video/" in url_lower or "/podcast" in url_lower:
+            continue
+        if item.get("title", "").strip():
+            candidates.append(item)
+
+    logger.info(f"{LOG_BOT} Digest: {len(candidates)} candidates from last 24h")
+
+    # STAGE 1 (free, local): cluster same story across outlets + rank clusters.
+    # Multi-outlet coverage = bigger story. Only top clusters go to the LLM.
+    DIGEST_KEYWORDS = {
+        "etf", "hack", "hacked", "exploit", "sec", "cftc", "lawsuit", "sued",
+        "fraud", "ban", "banned", "crackdown", "sanction", "tariff", "fomc",
+        "federal reserve", "rate cut", "rate hike", "cpi", "inflation", "powell",
+        "trump", "musk", "white house", "whale", "blackrock", "microstrategy",
+        "saylor", "liquidat", "depeg", "bankrupt", "insolven", "seize", "raid",
+        "halving", "mainnet", "upgrade", "fork", "congress", "senate", "bill",
+        "rbi", "fiu", "tax", "cbdc",
+    }
+
+    pre_clusters: List[List[Dict[str, Any]]] = []
+    for item in candidates:
+        fp = title_fingerprint(item.get("title", ""))
+        placed = False
+        for c in pre_clusters:
+            if same_story(fp, title_fingerprint(c[0].get("title", ""))):
+                c.append(item)
+                placed = True
+                break
+        if not placed:
+            pre_clusters.append([item])
+
+    def pre_score(c: List[Dict[str, Any]]):
+        outlets = len({x.get("source", "?") for x in c})
+        text = " ".join(x.get("title", "") for x in c).lower()
+        kw = sum(1 for k in DIGEST_KEYWORDS if k in text)
+        fresh = 1 if any((now_utc.timestamp() - x.get("published_ts", 0)) < 6 * 3600
+                         and x.get("published_ts", 0) > 0 for x in c) else 0
+        return (outlets * 10 + min(kw, 10) + fresh, max(x.get("published_ts", 0) for x in c))
+
+    pre_clusters.sort(key=pre_score, reverse=True)
+
+    # Take items from top clusters, max 30 LLM calls
+    shortlisted: List[Dict[str, Any]] = []
+    for c in pre_clusters:
+        for item in c:
+            if len(shortlisted) >= 30:
+                break
+            shortlisted.append(item)
+        if len(shortlisted) >= 30:
+            break
+
+    logger.info(f"{LOG_BOT} Digest: shortlisted {len(shortlisted)} items for AI review")
+
+    # STAGE 2 (AI): analyze shortlisted only (polite pacing for free-tier limits)
+    scored: List[Dict[str, Any]] = []
+    for i, item in enumerate(shortlisted):
+        analysis = analyze_with_llm(
+            item.get("title", ""), item.get("description", ""), item.get("source", "Unknown")
+        )
+        if isinstance(analysis, dict) and analysis.get("__api_error__"):
+            logger.warning(f"{LOG_WARN} Digest: LLM failed for item, skipping")
+            continue
+        if analysis is None:
+            continue  # Not high-impact
+        scored.append({
+            "item": item,
+            "analysis": analysis,
+            "fp": title_fingerprint(item.get("title", "")),
+        })
+        if i < len(shortlisted) - 1:
+            time.sleep(5)
+
+    if not scored:
+        logger.warning(f"{LOG_WARN} Digest: no high-impact story found in last 24h")
+        return False
+
+    # Prefer HIGH impact; fall back to MEDIUM
+    highs = [s for s in scored if s["analysis"].get("impact") == "HIGH"]
+    pool = highs if highs else scored
+
+    # Cluster same story (multi-outlet coverage = bigger story)
+    clusters: List[List[Dict[str, Any]]] = []
+    for s in pool:
+        placed = False
+        for c in clusters:
+            if same_story(s["fp"], c[0]["fp"]):
+                c.append(s)
+                placed = True
+                break
+        if not placed:
+            clusters.append([s])
+
+    def cluster_key(c: List[Dict[str, Any]]):
+        latest = max(x["item"].get("published_ts", 0) for x in c)
+        return (len(c), latest)
+
+    clusters.sort(key=cluster_key, reverse=True)
+
+    top_cluster = clusters[0]
+    # Representative: HIGH impact + latest within cluster
+    top_cluster.sort(
+        key=lambda x: (1 if x["analysis"].get("impact") == "HIGH" else 0,
+                       x["item"].get("published_ts", 0)),
+        reverse=True,
+    )
+    top = {
+        "item": top_cluster[0]["item"],
+        "analysis": top_cluster[0]["analysis"],
+        "outlets": len({x["item"].get("source", "?") for x in top_cluster}),
+    }
+    runners_up = [
+        {"item": c[0]["item"], "analysis": c[0]["analysis"], "outlets": len(c)}
+        for c in clusters[1:3]
+    ]
+
+    message = format_digest_message(top, runners_up)
+    if send_telegram_message(message):
+        LAST_DIGEST = today_ist
+        save_processed_hashes()
+        logger.info(f"{LOG_SENT} Digest posted for {today_ist}")
+        return True
+    return False
+
+
 def main():
     """Main event loop."""
     mode_str = "DRY-RUN" if DRY_RUN else ("LOCAL" if LOCAL_MODE else "LIVE")
@@ -1117,6 +1328,11 @@ def main():
     
     # Load previously processed items from disk (prevents duplicates after restart)
     load_processed_hashes()
+
+    # Digest mode: post BIG HEADLINE of last 24h once, then exit
+    if DIGEST_MODE:
+        run_digest()
+        return
     
     consecutive_errors = 0
     max_consecutive_errors = 5
