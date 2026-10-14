@@ -82,7 +82,12 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 # "I allow callmebot to send me messages" bhejo, apikey milega.
 WHATSAPP_ENABLED = os.getenv("WHATSAPP_ENABLED", "false").lower() in ("1", "true", "yes")
 WHATSAPP_PHONE = os.getenv("WHATSAPP_PHONE", "")      # e.g. 919876543210 (country code + number, bina + ke)
+# Provider: "callmebot" (free, aasaan) ya "cloudapi" (official Meta API)
+WHATSAPP_PROVIDER = os.getenv("WHATSAPP_PROVIDER", "callmebot").lower()
 WHATSAPP_APIKEY = os.getenv("WHATSAPP_APIKEY", "")    # CallMeBot se mila apikey
+# Official Meta WhatsApp Cloud API (developers.facebook.com se):
+WHATSAPP_CLOUD_TOKEN = os.getenv("WHATSAPP_CLOUD_TOKEN", "")        # access token
+WHATSAPP_CLOUD_PHONE_ID = os.getenv("WHATSAPP_CLOUD_PHONE_ID", "")  # test number ka Phone Number ID
 
 # RSS Feed Sources - ONLY top-tier genuine outlets (no clickbait / spam feeds)
 CRYPTO_RSS_FEEDS = [
@@ -1210,9 +1215,44 @@ def format_whatsapp_message(analysis: Dict[str, Any], original_url: str, origina
     return "\n".join(lines)
 
 
+def _send_whatsapp_cloudapi(text: str) -> bool:
+    """Send via official Meta WhatsApp Cloud API. Never raises."""
+    if not WHATSAPP_CLOUD_TOKEN or not WHATSAPP_CLOUD_PHONE_ID:
+        logger.warning(f"{LOG_WARN} Cloud API selected but WHATSAPP_CLOUD_TOKEN/PHONE_ID missing - skipping")
+        return False
+    if not WHATSAPP_PHONE:
+        logger.warning(f"{LOG_WARN} WHATSAPP_PHONE (receiver number) missing - skipping")
+        return False
+    try:
+        response = requests.post(
+            f"https://graph.facebook.com/v22.0/{WHATSAPP_CLOUD_PHONE_ID}/messages",
+            headers={
+                "Authorization": f"Bearer {WHATSAPP_CLOUD_TOKEN}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": WHATSAPP_PHONE,
+                "type": "text",
+                "text": {"preview_url": True, "body": text[:4000]},
+            },
+            timeout=20,
+        )
+        if response.status_code == 200:
+            logger.info(f"{LOG_SENT} WhatsApp (Cloud API) message sent successfully")
+            return True
+        logger.warning(f"{LOG_WARN} WhatsApp Cloud API failed: HTTP {response.status_code}: {response.text[:300]}")
+        return False
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"{LOG_WARN} WhatsApp Cloud API error: {e}")
+        return False
+
+
 def send_whatsapp_message(text: str) -> bool:
-    """Send alert to WhatsApp via CallMeBot (FREE). Best-effort: never raises,
-    returns False on any failure (Telegram remains the primary channel)."""
+    """Send alert to WhatsApp. Provider picked by WHATSAPP_PROVIDER env:
+    "callmebot" (FREE, easy) or "cloudapi" (official Meta API).
+    Best-effort: never raises, returns False on any failure (Telegram remains primary)."""
 
     if not WHATSAPP_ENABLED:
         return False
@@ -1228,6 +1268,9 @@ def send_whatsapp_message(text: str) -> bool:
         except Exception:
             pass  # Ignore console encoding issues
         return True
+
+    if WHATSAPP_PROVIDER == "cloudapi":
+        return _send_whatsapp_cloudapi(text)
 
     if not WHATSAPP_PHONE or not WHATSAPP_APIKEY:
         logger.warning(f"{LOG_WARN} WhatsApp enabled but WHATSAPP_PHONE/WHATSAPP_APIKEY missing - skipping")
