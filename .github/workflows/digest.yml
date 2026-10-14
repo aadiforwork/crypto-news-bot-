@@ -29,6 +29,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Check secrets (fail LOUD if missing - no silent green runs)
+        run: |
+          missing=0
+          [ -n "${{ secrets.TELEGRAM_BOT_TOKEN }}" ] || { echo "::error::MISSING SECRET: TELEGRAM_BOT_TOKEN"; missing=1; }
+          [ -n "${{ secrets.TELEGRAM_CHAT_ID }}" ] || { echo "::error::MISSING SECRET: TELEGRAM_CHAT_ID"; missing=1; }
+          [ -n "${{ secrets.GROQ_API_KEY }}" ] || { echo "::error::MISSING SECRET: GROQ_API_KEY"; missing=1; }
+          [ "$missing" = "1" ] && { echo "Add secrets at: repo Settings > Secrets and variables > Actions"; exit 1; }
+          echo "All required secrets present."
+
       - name: Post big headline of last 24h
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -36,6 +45,9 @@ jobs:
           LLM_PROVIDER: groq
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GROQ_MODEL: openai/gpt-oss-20b
+          WHATSAPP_ENABLED: ${{ secrets.WHATSAPP_ENABLED }}
+          WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE }}
+          WHATSAPP_APIKEY: ${{ secrets.WHATSAPP_APIKEY }}
         run: python main.py --digest
 
       - name: Save digest state

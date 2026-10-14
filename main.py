@@ -77,6 +77,13 @@ GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_M
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
+# WhatsApp Alerts (FREE via CallMeBot - optional, Telegram stays primary)
+# Setup: phone me CallMeBot number save karo, usko WhatsApp pe
+# "I allow callmebot to send me messages" bhejo, apikey milega.
+WHATSAPP_ENABLED = os.getenv("WHATSAPP_ENABLED", "false").lower() in ("1", "true", "yes")
+WHATSAPP_PHONE = os.getenv("WHATSAPP_PHONE", "")      # e.g. 919876543210 (country code + number, bina + ke)
+WHATSAPP_APIKEY = os.getenv("WHATSAPP_APIKEY", "")    # CallMeBot se mila apikey
+
 # RSS Feed Sources - ONLY top-tier genuine outlets (no clickbait / spam feeds)
 CRYPTO_RSS_FEEDS = [
     {"name": "CoinDesk", "url": "https://www.coindesk.com/arc/outboundfeeds/rss"},
@@ -132,6 +139,20 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# File logging - ALWAYS active (Task Scheduler / pythonw has no console, so
+# without this all logs would vanish and deaths would leave zero trace).
+try:
+    _LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "bot.log")
+    os.makedirs(os.path.dirname(_LOG_FILE), exist_ok=True)
+    _file_handler = logging.FileHandler(_LOG_FILE, encoding="utf-8")
+    _file_handler.setFormatter(logging.Formatter(
+        fmt="%(asctime)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    ))
+    logging.getLogger().addHandler(_file_handler)
+except Exception as _log_err:
+    logger.warning(f"Could not set up file logging: {_log_err}")
+
 # ASCII-safe log prefixes
 LOG_BOT = "[BOT]"
 LOG_RSS = "[RSS]"
@@ -150,7 +171,13 @@ processed_hashes: Set[str] = set()
 processed_stories: List[frozenset] = []
 
 # Cache for macro events to avoid re-sending same calendar events
+# (persisted to processed.json so restarts don't cause duplicate macro alerts)
 macro_event_cache: Dict[str, datetime] = {}
+
+# Throttle for calendar HTTP downloads (faireconomy rate-limits aggressive polling -> 429).
+# Raw JSON is cached here; the time-window filter is re-applied on every cycle.
+_MACRO_HTTP_CACHE: Dict[str, Any] = {"at": None, "events": []}
+MACRO_FETCH_INTERVAL = int(os.getenv("MACRO_FETCH_INTERVAL", "3600"))  # seconds between calendar downloads
 
 # Persistent storage file for processed hashes (survives restarts)
 PROCESSED_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "processed.json")
@@ -161,7 +188,7 @@ LAST_DIGEST = ""
 
 def load_processed_hashes() -> None:
     """Load previously processed hashes + story fingerprints from disk."""
-    global processed_hashes, processed_stories, LAST_DIGEST
+    global processed_hashes, processed_stories, LAST_DIGEST, macro_event_cache
     try:
         if os.path.exists(PROCESSED_FILE):
             with open(PROCESSED_FILE, "r", encoding="utf-8") as f:
@@ -175,7 +202,17 @@ def load_processed_hashes() -> None:
                     processed_hashes = set(data.get("hashes", []))
                     processed_stories = [frozenset(s) for s in data.get("stories", [])]
                     LAST_DIGEST = data.get("last_digest", "")
-                    logger.info(f"{LOG_BOT} Loaded {len(processed_hashes)} hashes + {len(processed_stories)} stories from disk")
+                    # Macro cache (ISO timestamps) - survives restarts, prevents duplicate macro alerts
+                    macro_event_cache = {}
+                    for k, v in (data.get("macro_cache", {}) or {}).items():
+                        try:
+                            dt = datetime.fromisoformat(v)
+                            if dt.tzinfo is None:
+                                dt = dt.replace(tzinfo=timezone.utc)
+                            macro_event_cache[k] = dt
+                        except (ValueError, TypeError):
+                            continue
+                    logger.info(f"{LOG_BOT} Loaded {len(processed_hashes)} hashes + {len(processed_stories)} stories + {len(macro_event_cache)} macro events from disk")
     except Exception as e:
         logger.warning(f"Could not load processed hashes: {e}")
 
@@ -187,7 +224,8 @@ def save_processed_hashes() -> None:
             json.dump({
                 "hashes": sorted(processed_hashes),
                 "stories": [sorted(s) for s in processed_stories[-2000:]],
-                "last_digest": LAST_DIGEST
+                "last_digest": LAST_DIGEST,
+                "macro_cache": {k: v.isoformat() for k, v in macro_event_cache.items()}
             }, f)
     except Exception as e:
         logger.warning(f"Could not save processed hashes: {e}")
@@ -363,65 +401,63 @@ def mock_analyze_with_llm(title: str, description: str, source: str) -> Optional
         if not any(_word_match(text, kw) for kw in CRYPTO_GATE_WORDS):
             return None  # SKIP - not crypto-related
     
-    # Generate Hinglish headline - Simple, natural Hinglish
-    hinglish_map = {
-        "ETF": "ETF approve hua - market khush!",
-        "Regulation": "Sarkar ne naye rules banaye - crypto pe asar!",
-        "Hack": "Bada hack hua - paise gayab, market dar gaya!",
-        "Macro": "Fed ka decision aaya - crypto liquidity change hogi!",
-        "Influencer": "Bade aadmi ne tweet kiya - market hil gaya!",
-        "Whale": "Whale ne bada move kiya - price pe asar!",
-        "Protocol": "Protocol upgrade hua - naye features aaye!",
+    # Generate Hinglish headline - NEWS-SPECIFIC (never fixed template).
+    # Each alert must be distinguishable: headline is derived from THIS title.
+    CATEGORY_ACTION = {
+        "ETF": "ETF update!",
+        "Regulation": "regulation update!",
+        "Hack": "hack alert!",
+        "Macro": "macro update!",
+        "Influencer": "bada bayan!",
+        "Whale": "whale move!",
+        "Protocol": "upgrade update!",
     }
-    
-    headline = hinglish_map.get(detected_category, "Badi khabar - market pe asar!")
+    action = CATEGORY_ACTION.get(detected_category, "badi khabar!")
+    # Core = first clause of the real title (keeps entity names like ENS / Sberbank)
+    core = title.split(" - ")[0].split(" | ")[0].split(":")[0].strip()
+    if len(core) > 40:
+        core = core[:37].rsplit(" ", 1)[0]  # cut at word boundary
+    headline = f"{core} - {action}"
     if len(headline) > 60:
         headline = headline[:57] + "..."
-    
-    # Generate summary bullets - Simple Hinglish
-    summary_templates = {
-        "ETF": [
-            "SEC ne Bitcoin ETF approve kiya - bade players aayenge",
-            "Price discovery better hoga, volatility kam hogi",
-            "Traditional finance ab crypto mein aa rahi hai"
-        ],
-        "Regulation": [
-            "Naye rules se exchange compliance strict hoga",
-            "Stablecoin reserve rules badh sakte hain",
-            "DeFi projects ko registration karna pad sakta hai"
-        ],
-        "Hack": [
-            "Attacker ne vulnerability use ki - $100M+ gayab",
-            "Exchange ne withdrawals band kiye - users pareshan",
-            "Chain analysis chal rahi - funds trace ho rahe hain"
-        ],
-        "Macro": [
-            "Fed rate decision se USD strong/weak hua",
-            "CPI data expectations se alag aaya",
-            "Liquidity conditions crypto ke liye badlenge"
-        ],
-        "Influencer": [
-            "High-profile tweet se sudden volume aaya",
-            "Market sentiment ekdum badal gaya",
-            "Traders apni positions adjust kar rahe hain"
-        ],
-        "Whale": [
-            "Bade wallet ne exchange pe paise dale - sell pressure",
-            "Institutional buyer ne kharida - bullish signal",
-            "On-chain data se move track hua"
-        ],
-        "Protocol": [
-            "Mainnet upgrade successfully activate hua",
-            "Gas fees kam honge, speed badhegi",
-            "Developers naye tools use kar sakte hain"
-        ],
+
+    # Generate summary bullets - NEWS-SPECIFIC (from THIS title + description).
+    # Bullet 1 = what happened (title), Bullet 2 = key detail (description),
+    # Bullet 3 = market impact tied to this story. Never generic fixed lines.
+    import re as _re2
+    clean_desc = _re.sub(r"\s+", " ", description).strip()
+    # First 1-2 meaningful sentences from the actual description
+    sentences = [s.strip() for s in _re2.split(r"(?<=[.!?])\s+", clean_desc) if len(s.strip()) > 25]
+    detail = " ".join(sentences[:2]).strip()
+    if len(detail) > 180:
+        detail = detail[:177].rsplit(" ", 1)[0] + "..."
+    title_short = title.strip()
+    if len(title_short) > 140:
+        title_short = title_short[:137].rsplit(" ", 1)[0] + "..."
+
+    CATEGORY_IMPACT_LINE = {
+        "ETF": "Isse liquidity/inflows badh sakte hain - price pe nazar rakho",
+        "Regulation": "Isse compliance/market access badlega - traders savdhaan rahein",
+        "Hack": "Isse panic selling ho sakti hai - apni holdings check karo",
+        "Macro": "Isse USD liquidity badlegi - crypto volatility badhegi",
+        "Influencer": "Isse sentiment jaldi badal sakta hai - volatility ready rakho",
+        "Whale": "Isse short-term price pressure aayega - levels dekho",
+        "Protocol": "Isse network use/fees badlenge - related coin pe asar",
     }
-    
-    summary = summary_templates.get(detected_category, [
-        "Market-moving event detect hua",
-        "Traders apni positions review karein",
-        "Volatility badhne ki sambhavna hai"
-    ])
+    impact_line = CATEGORY_IMPACT_LINE.get(detected_category, "Volatility badh sakti hai - positions review karo")
+
+    if detail:
+        summary = [
+            f"Kya hua: {title_short}",
+            f"Detail: {detail} ({source} ne report kiya)",
+            f"Asar: {impact_line}",
+        ]
+    else:
+        summary = [
+            f"Kya hua: {title_short}",
+            f"Source: {source} ne report kiya - details aa rahi hain",
+            f"Asar: {impact_line}",
+        ]
     
     impact = "HIGH" if detected_category in ["ETF", "Regulation", "Hack", "Macro", "Influencer"] else "MEDIUM"
     
@@ -477,11 +513,14 @@ STRICT FILTERING RULES:
    Write in SIMPLE, NATURAL ROMAN HINGLISH (Hindi in English script, easy to read on mobile).
    Use simple words like: "sarkar" not "government", "paise" not "funds", "bada" not "major", "market" not "marketplace".
    Example style: "ETF approve hua - market khush!", "Sarkar ne naye rules banaye - crypto pe asar!"
+   CRITICAL: headline + summary MUST be specific to THIS news (names, numbers, coin, company from Title/Description). NEVER reuse fixed generic lines for a category. Two different news MUST get different summaries.
+   BAD (generic template - NEVER do this): Title Solana Alpenglow Oct 21 150ms -> headline Protocol upgrade hua - naye features aaye = REJECT. GOOD: headline names Solana/Alpenglow/150ms/Oct 21.
+   BAD (copy-paste - NEVER do this): Coins.ph central-bank action and SkyAI SOL-dollar100 SEC risk must NOT share identical headline and bullets. Each names its own entity.
    Return ONLY this JSON structure:
    {
      "category": "ETF/Regulation/Hack/Macro/Whale/Protocol/Influencer",
-     "headline": "Simple Hinglish headline (max 60 chars)",
-     "summary": ["Point 1 in simple Hinglish", "Point 2 in simple Hinglish", "Point 3 in simple Hinglish"],
+     "headline": "News-specific Hinglish headline (max 60 chars, include key entity from title)",
+     "summary": ["Point 1: kya hua in THIS news (names/numbers)", "Point 2: key detail from THIS description", "Point 3: is khabar ka market pe asar"],
      "impact": "HIGH" or "MEDIUM",
      "source_name": "Source name from input"
    }
@@ -609,93 +648,144 @@ def fetch_rss_feed(feed_info: Dict[str, str], since_hours: Optional[float] = Non
         return []
 
 
-def fetch_forex_factory_calendar() -> List[Dict[str, Any]]:
-    """Fetch high-impact USD macro events from economic calendar."""
-    items = []
-    
+def _parse_calendar_time(event: Dict[str, Any]) -> Optional[datetime]:
+    """Parse an event time from either calendar schema. Always returns an
+    aware UTC datetime, or None if unparseable.
+
+    Real faireconomy schema: {"date": "2026-10-14T12:30:00-04:00", ...} (ISO-8601 with offset).
+    Legacy schema: {"date": "2026-10-14", "time": "12:30"} (no tz -> treated as UTC).
+    """
+    raw = (event.get("date") or "").strip()
+    if not raw:
+        return None
     try:
-        logger.debug(f"Fetching macro calendar: {FOREX_FACTORY_CALENDAR_URL}")
+        t = (event.get("time") or "").strip()
+        if t and "T" not in raw:
+            dt = datetime.strptime(f"{raw} {t[:5]}", "%Y-%m-%d %H:%M")
+            return dt.replace(tzinfo=timezone.utc)
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def _macro_event_matches(event: Dict[str, Any]) -> Optional[str]:
+    """Return the normalized event title if this is a tracked high-impact USD
+    event, else None. Handles both schemas (title/country AND event/currency)."""
+    country = (event.get("country") or event.get("currency") or "").strip().upper()
+    if country != "USD":
+        return None
+    if (event.get("impact") or "").strip().lower() != "high":
+        return None
+    title = (event.get("title") or event.get("event") or "").strip()
+    if not title:
+        return None
+    if not any(keyword.lower() in title.lower() for keyword in HIGH_IMPACT_USD_EVENTS):
+        return None
+    return title
+
+
+def _download_calendar() -> List[Dict[str, Any]]:
+    """Download raw calendar JSON (throttled). NEVER raises: on 429/timeout/bad
+    JSON it logs a warning and returns the last cached download (possibly [])."""
+    global _MACRO_HTTP_CACHE
+    now = datetime.now(timezone.utc)
+    last = _MACRO_HTTP_CACHE.get("at")
+    cached = _MACRO_HTTP_CACHE.get("events") or []
+    if last is not None and (now - last).total_seconds() < MACRO_FETCH_INTERVAL and cached:
+        return cached
+    try:
         response = requests.get(FOREX_FACTORY_CALENDAR_URL, timeout=15)
         response.raise_for_status()
-        events = response.json()
-        
+        data = response.json()
+        if not isinstance(data, list):
+            logger.warning(f"{LOG_WARN} Macro calendar returned non-list JSON, using cached data")
+            return cached
+        _MACRO_HTTP_CACHE = {"at": now, "events": data}
+        return data
+    except requests.exceptions.HTTPError as e:
+        status = getattr(getattr(e, "response", None), "status_code", "?")
+        logger.warning(f"{LOG_WARN} Macro calendar HTTP {status} (rate-limited?) - using cached data")
+    except requests.exceptions.Timeout:
+        logger.warning(f"{LOG_WARN} Forex Factory calendar timeout - using cached data")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"{LOG_ERR} Forex Factory calendar error: {e} - using cached data")
+    except (json.JSONDecodeError, ValueError):
+        logger.error(f"{LOG_ERR} Invalid JSON from Forex Factory calendar - using cached data")
+    except Exception as e:
+        logger.error(f"{LOG_ERR} Macro calendar fetch error: {e} - using cached data")
+    return cached
+
+
+def fetch_forex_factory_calendar() -> List[Dict[str, Any]]:
+    """Filter cached/downloaded calendar down to high-impact USD macro events
+    inside the alert window (last 6h -> next 24h). Timezone-safe."""
+    items = []
+
+    try:
+        events = _download_calendar()
+
         now = datetime.now(timezone.utc)
         window_start = now - timedelta(hours=6)  # Events from last 6 hours
         window_end = now + timedelta(hours=24)   # Upcoming 24 hours
-        
+
         for event in events:
             try:
-                # Parse event time
-                event_time_str = event.get("date", "") + " " + event.get("time", "00:00")
-                event_time = datetime.strptime(event_time_str, "%Y-%m-%d %H:%M")
-                
-                # Skip if outside our window
+                title = _macro_event_matches(event)
+                if not title:
+                    continue
+
+                event_time = _parse_calendar_time(event)
+                if event_time is None:
+                    continue
+
+                # Skip if outside our window (both sides are aware datetimes now)
                 if not (window_start <= event_time <= window_end):
                     continue
-                
-                # Filter: Only USD currency
-                currency = event.get("currency", "").upper()
-                if currency != "USD":
-                    continue
-                
-                # Filter: Only High Impact
-                impact = event.get("impact", "").lower()
-                if impact != "high":
-                    continue
-                
-                # Filter: Only our target event types
-                event_name = event.get("event", "").strip()
-                if not any(keyword.lower() in event_name.lower() for keyword in HIGH_IMPACT_USD_EVENTS):
-                    continue
-                
+
                 # Create unique cache key
-                cache_key = f"{event_name}_{event_time_str}"
+                cache_key = f"{title}_{event_time.isoformat()}"
                 if cache_key in macro_event_cache:
                     continue  # Already sent this event
-                
+
                 # Build description
-                actual = event.get("actual", "")
-                forecast = event.get("forecast", "")
-                previous = event.get("previous", "")
-                
-                desc_parts = [f"Event: {event_name}"]
+                actual = event.get("actual", "") or ""
+                forecast = event.get("forecast", "") or ""
+                previous = event.get("previous", "") or ""
+
+                desc_parts = [f"Event: {title}"]
                 if actual:
                     desc_parts.append(f"Actual: {actual}")
                 if forecast:
                     desc_parts.append(f"Forecast: {forecast}")
                 if previous:
                     desc_parts.append(f"Previous: {previous}")
-                
+
                 # Determine if it's upcoming or past
                 time_label = "UPCOMING" if event_time > now else "JUST RELEASED"
-                
+
                 items.append({
-                    "title": f"[{time_label}] {event_name} - High Impact USD",
+                    "title": f"[{time_label}] {title} - High Impact USD",
                     "description": " | ".join(desc_parts),
                     "url": f"https://www.forexfactory.com/calendar?day={event_time.strftime('%Y-%m-%d')}",
                     "source": "Forex Factory Calendar",
-                    "published": event_time_str,
+                    "published": event_time.isoformat(),
                     "type": "macro_event",
                     "cache_key": cache_key
                 })
-                
-            except (ValueError, KeyError) as e:
+
+            except Exception as e:
                 logger.debug(f"Skipping malformed calendar event: {e}")
                 continue
-        
+
         logger.info(f"{LOG_MACRO} Forex Factory: {len(items)} high-impact USD events")
         return items
-        
-    except requests.exceptions.Timeout:
-        logger.warning("Forex Factory calendar timeout")
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Forex Factory calendar error: {e}")
-    except json.JSONDecodeError:
-        logger.error("Invalid JSON from Forex Factory calendar")
+
     except Exception as e:
-        logger.error(f"Macro calendar fetch error: {e}")
-    
-    return []
+        logger.error(f"{LOG_ERR} Macro calendar filter error: {e}")
+        return []
 
 
 def fetch_all_news() -> List[Dict[str, Any]]:
@@ -716,36 +806,49 @@ def fetch_all_news() -> List[Dict[str, Any]]:
 
 def analyze_with_llm(title: str, description: str, source: str) -> Optional[Dict[str, Any]]:
     """Send news to FREE LLM (Gemini/Groq/OpenRouter) for analysis."""
-    
+
     # DRY-RUN or LOCAL: Use mock analysis (perfect Hinglish, no API needed)
     if DRY_RUN or LOCAL_MODE:
         return mock_analyze_with_llm(title, description, source)
-    
+
     user_content = f"""Title: {title}
 Description: {description}
 Source: {source}
 
 Analyze this crypto news item."""
 
+    result: Optional[Dict[str, Any]] = None
+
     # ============ OLLAMA (FREE, LOCAL, NO ACCOUNT) ============
     if LLM_PROVIDER == "ollama":
-        return _analyze_with_ollama(user_content)
-    
+        result = _analyze_with_ollama(user_content)
+
     # ============ GEMINI (FREE: 1500 req/day) ============
     elif LLM_PROVIDER == "gemini":
-        return _analyze_with_gemini(user_content)
-    
-    # ============ GROQ (FREE: fast, generous) ============
+        result = _analyze_with_gemini(user_content)
+
+    # ============ GROQ (FREE, fast, generous) ============
     elif LLM_PROVIDER == "groq":
-        return _analyze_with_groq(user_content)
-    
+        result = _analyze_with_groq(user_content)
+
     # ============ OPENROUTER (needs credits) ============
     elif LLM_PROVIDER == "openrouter":
-        return _analyze_with_openrouter(user_content)
-    
+        result = _analyze_with_openrouter(user_content)
+
     else:
         logger.error(f"Unknown LLM_PROVIDER: {LLM_PROVIDER}")
         return None
+
+    # Specificity guard: small/cheap models often return the same template
+    # for a whole category (e.g. identical Regulation bullets for Coins.ph
+    # and SkyAI). Fall back to the deterministic specific builder instead
+    # of spamming a generic alert.
+    if isinstance(result, dict) and not result.get("__api_error__"):
+        if is_generic_analysis(result, title, description):
+            logger.warning(f"{LOG_WARN} Generic LLM output rejected, using specific fallback: {title[:70]}...")
+            return mock_analyze_with_llm(title, description, source)
+
+    return result
 
 
 def _analyze_with_gemini(user_content: str) -> Optional[Dict[str, Any]]:
@@ -946,6 +1049,61 @@ def _parse_llm_response(content: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+# Phrases seen in the wild from small/cheap LLMs ignoring the "be specific"
+# instruction and returning the same template for every alert in a category.
+# If any of these appear, the response is generic and must be rejected.
+GENERIC_BANNED_SUBSTRINGS = [
+    "naye features aaye",
+    "gas fees kam honge",
+    "speed badhegi",
+    "developers naye tools",
+    "naye rules se exchange compliance",
+    "stablecoin reserve rules",
+    "defi projects ko registration",
+    "sarkar ne naye rules banaye - crypto pe asar",
+    "protocol upgrade hua",
+    "mainnet upgrade successfully",
+]
+
+
+def is_generic_analysis(analysis: Dict[str, Any], title: str, description: str) -> bool:
+    """Reject template/generic LLM output that ignores the THIS-news rule.
+
+    Returns True when the headline+summary look copy-pasted instead of
+    derived from this specific title/description.
+    """
+    headline = str(analysis.get("headline", "") or "")
+    summary = analysis.get("summary", []) or []
+    blob = f"{headline} {' '.join(str(s) for s in summary)}".lower()
+
+    # 1. Known template phrases -> instantly generic.
+    for banned in GENERIC_BANNED_SUBSTRINGS:
+        if banned in blob:
+            return True
+
+    # 2. Two different stories must not produce byte-identical summaries.
+    #    (Checked implicitly: identical template bullets hit rule 1, but also
+    #    catch any 3-bullet output with zero title-specific words.)
+    fp = title_fingerprint(title or "")
+    if not fp:
+        return False  # Can't judge very short titles; let it through.
+    blob_words = set(__import__("re").findall(r"[a-z0-9]+", blob))
+    overlap = len(fp & blob_words)
+    # Require at least 2 significant title words (or 1 if title is very short)
+    # to appear somewhere in headline+summary. Solana/Alpenglow/Coins.ph/SkyAI
+    # style entities must be echoed, otherwise the LLM wrote a template.
+    required = 1 if len(fp) <= 3 else 2
+    if overlap < required:
+        return True
+
+    # 3. All 3 bullets identical to each other (degenerate output).
+    normed = [str(s).strip().lower() for s in summary if str(s).strip()]
+    if len(normed) >= 2 and len(set(normed)) == 1:
+        return True
+
+    return False
+
+
 def format_telegram_message(analysis: Dict[str, Any], original_url: str, original_title: str = "") -> str:
     """Format analysis into Telegram Markdown message in Hinglish."""
     
@@ -1024,6 +1182,75 @@ def send_telegram_message(text: str) -> bool:
         return False
 
 
+def format_whatsapp_message(analysis: Dict[str, Any], original_url: str, original_title: str = "") -> str:
+    """Format analysis into plain-text WhatsApp message (no Markdown - WhatsApp
+    only supports *bold* / _italic_, so keep it simple). Links are raw URLs so
+    WhatsApp shows a preview."""
+
+    category = analysis.get("category", "NEWS")
+    headline = analysis.get("headline", "Breaking News")
+    summary = analysis.get("summary", [])
+    impact = analysis.get("impact", "MEDIUM")
+    source_name = analysis.get("source_name", "Unknown")
+
+    impact_emoji = "🔥" if impact == "HIGH" else "⚡"
+
+    lines = [f"🚨 [{category}]"]
+    if original_title:
+        short_title = original_title.strip()
+        if len(short_title) > 120:
+            short_title = short_title[:117] + "..."
+        lines.append(f"📰 {short_title}")
+    lines.append(f"Headline: {headline}")
+    for point in summary[:3]:  # Max 3 points
+        lines.append(f"• {point}")
+    lines.append(f"Impact: {impact_emoji} {impact}")
+    lines.append(f"Source: {source_name} - {original_url}")
+
+    return "\n".join(lines)
+
+
+def send_whatsapp_message(text: str) -> bool:
+    """Send alert to WhatsApp via CallMeBot (FREE). Best-effort: never raises,
+    returns False on any failure (Telegram remains the primary channel)."""
+
+    if not WHATSAPP_ENABLED:
+        return False
+
+    # DRY-RUN: Print to console instead of sending
+    if DRY_RUN:
+        try:
+            print("\n" + "=" * 60)
+            print("[WA] WHATSAPP MESSAGE (DRY-RUN):")
+            print("=" * 60)
+            print(text[:1500])
+            print("=" * 60 + "\n")
+        except Exception:
+            pass  # Ignore console encoding issues
+        return True
+
+    if not WHATSAPP_PHONE or not WHATSAPP_APIKEY:
+        logger.warning(f"{LOG_WARN} WhatsApp enabled but WHATSAPP_PHONE/WHATSAPP_APIKEY missing - skipping")
+        return False
+
+    try:
+        # CallMeBot free API: GET with phone (country code + number, no +), text, apikey
+        response = requests.get(
+            "https://api.callmebot.com/whatsapp.php",
+            params={"phone": WHATSAPP_PHONE, "text": text[:3000], "apikey": WHATSAPP_APIKEY},
+            timeout=20,
+        )
+        if response.status_code == 200:
+            logger.info(f"{LOG_SENT} WhatsApp message sent successfully")
+            return True
+        logger.warning(f"{LOG_WARN} WhatsApp send failed: HTTP {response.status_code}: {response.text[:200]}")
+        return False
+
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"{LOG_WARN} WhatsApp send error: {e}")
+        return False
+
+
 def process_news_item(item: Dict[str, Any]) -> bool:
     """Process a single news item: analyze and send if valid."""
     item_hash = generate_item_hash(item["title"], item["url"])
@@ -1077,7 +1304,13 @@ def process_news_item(item: Dict[str, Any]) -> bool:
     # Format and send (with original title so each alert is distinguishable)
     message = format_telegram_message(analysis, url, original_title=title)
     success = send_telegram_message(message)
-    
+
+    # Mirror the same alert to WhatsApp (best-effort, Telegram stays primary)
+    if success and WHATSAPP_ENABLED:
+        wa_message = format_whatsapp_message(analysis, url, original_title=title)
+        if not send_whatsapp_message(wa_message):
+            logger.warning(f"{LOG_WARN} Telegram sent but WhatsApp failed: {title[:70]}...")
+
     if success:
         processed_hashes.add(item_hash)
         # Remember story fingerprint so other feeds' copies are skipped
@@ -1300,6 +1533,20 @@ def run_digest() -> bool:
 
     message = format_digest_message(top, runners_up)
     if send_telegram_message(message):
+        if WHATSAPP_ENABLED:
+            wa_top = top["item"]
+            wa_text = format_whatsapp_message(top["analysis"], wa_top.get("url", ""), wa_top.get("title", ""))
+            if runners_up:
+                extra = []
+                for r in runners_up[:2]:
+                    t = r["item"].get("title", "").strip()
+                    if len(t) > 90:
+                        t = t[:87] + "..."
+                    extra.append(f"+ {t}")
+                wa_text += "\n\nAlso big:\n" + "\n".join(extra)
+            wa_text = "BIG HEADLINE - LAST 24 HOURS\n" + wa_text
+            if not send_whatsapp_message(wa_text):
+                logger.warning(f"{LOG_WARN} Digest sent to Telegram but WhatsApp failed")
         LAST_DIGEST = today_ist
         save_processed_hashes()
         logger.info(f"{LOG_SENT} Digest posted for {today_ist}")
@@ -1311,6 +1558,7 @@ def main():
     """Main event loop."""
     mode_str = "DRY-RUN" if DRY_RUN else ("LOCAL" if LOCAL_MODE else "LIVE")
     logger.info(f"{LOG_BOT} Crypto AI News Bot Starting... [{mode_str}]")
+    logger.info(f"{LOG_BOT} pid={os.getpid()} wa_enabled={WHATSAPP_ENABLED}")
     logger.info(f"{LOG_BOT} Polling interval: {POLL_INTERVAL}s")
     if LOCAL_MODE or DRY_RUN:
         logger.info(f"{LOG_BOT} Analyzer: local keyword filter (Hinglish templates, no API)")
@@ -1359,10 +1607,9 @@ def main():
                 if process_news_item(item):
                     new_count += 1
             
-            if new_count > 0:
-                logger.info(f"{LOG_RSS} Processed {len(news_items)} items, sent {new_count} alerts")
-            elif DRY_RUN:
-                logger.info(f"{LOG_RSS} Processed {len(news_items)} items, 0 alerts (all filtered by mock LLM)")
+            # Heartbeat EVERY cycle (even with 0 alerts) - proves the bot is alive.
+            # If these lines stop appearing in the log, the process was killed externally.
+            logger.info(f"{LOG_RSS} Heartbeat: scanned {len(news_items)} items, sent {new_count} new alerts")
             
             # Periodic cleanup
             cleanup_old_data()
@@ -1375,7 +1622,7 @@ def main():
             save_processed_hashes()
             break
         except Exception as e:
-            logger.error(f"{LOG_ERR} Unexpected error in main loop: {e}")
+            logger.exception(f"{LOG_ERR} Unexpected error in main loop: {e}")
             consecutive_errors += 1
         
         if RUN_ONCE:
