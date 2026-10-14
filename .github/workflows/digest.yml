@@ -51,6 +51,8 @@ jobs:
           WHATSAPP_APIKEY: ${{ secrets.WHATSAPP_APIKEY }}
           WHATSAPP_CLOUD_TOKEN: ${{ secrets.WHATSAPP_CLOUD_TOKEN }}
           WHATSAPP_CLOUD_PHONE_ID: ${{ secrets.WHATSAPP_CLOUD_PHONE_ID }}
+          NTFY_ENABLED: ${{ secrets.NTFY_ENABLED }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: python main.py --digest
 
       - name: Save digest state

@@ -89,6 +89,11 @@ WHATSAPP_APIKEY = os.getenv("WHATSAPP_APIKEY", "")    # CallMeBot se mila apikey
 WHATSAPP_CLOUD_TOKEN = os.getenv("WHATSAPP_CLOUD_TOKEN", "")        # access token
 WHATSAPP_CLOUD_PHONE_ID = os.getenv("WHATSAPP_CLOUD_PHONE_ID", "")  # test number ka Phone Number ID
 
+# Instant phone push via ntfy.sh (FREE, no signup, no stranger numbers, no business account)
+# Sirf app install + topic subscribe. Telegram jaisa instant notification phone pe.
+NTFY_ENABLED = os.getenv("NTFY_ENABLED", "false").lower() in ("1", "true", "yes")
+NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")  # secret sa topic naam, e.g. crypto-aadi-x7k2p9
+
 # RSS Feed Sources - ONLY top-tier genuine outlets (no clickbait / spam feeds)
 CRYPTO_RSS_FEEDS = [
     {"name": "CoinDesk", "url": "https://www.coindesk.com/arc/outboundfeeds/rss"},
@@ -1294,6 +1299,45 @@ def send_whatsapp_message(text: str) -> bool:
         return False
 
 
+def send_ntfy_push(text: str) -> bool:
+    """Instant phone notification via ntfy.sh (FREE, no account, no signup).
+    Best-effort: never raises, returns False on any failure (Telegram stays primary)."""
+    if not NTFY_ENABLED:
+        return False
+
+    # DRY-RUN: Print to console instead of sending
+    if DRY_RUN:
+        try:
+            print("\n" + "=" * 60)
+            print("[NTFY] PUSH MESSAGE (DRY-RUN):")
+            print("=" * 60)
+            print(text[:800])
+            print("=" * 60 + "\n")
+        except Exception:
+            pass  # Ignore console encoding issues
+        return True
+
+    if not NTFY_TOPIC:
+        logger.warning(f"{LOG_WARN} ntfy enabled but NTFY_TOPIC missing - skipping")
+        return False
+
+    try:
+        response = requests.post(
+            f"https://ntfy.sh/{NTFY_TOPIC}",
+            data=text[:3500].encode("utf-8"),
+            headers={"Title": "Crypto Alert", "Priority": "high", "Tags": "chart_with_upwards_trend"},
+            timeout=15,
+        )
+        if response.status_code == 200:
+            logger.info(f"{LOG_SENT} ntfy push sent successfully")
+            return True
+        logger.warning(f"{LOG_WARN} ntfy send failed: HTTP {response.status_code}: {response.text[:200]}")
+        return False
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"{LOG_WARN} ntfy send error: {e}")
+        return False
+
+
 def process_news_item(item: Dict[str, Any]) -> bool:
     """Process a single news item: analyze and send if valid."""
     item_hash = generate_item_hash(item["title"], item["url"])
@@ -1353,6 +1397,12 @@ def process_news_item(item: Dict[str, Any]) -> bool:
         wa_message = format_whatsapp_message(analysis, url, original_title=title)
         if not send_whatsapp_message(wa_message):
             logger.warning(f"{LOG_WARN} Telegram sent but WhatsApp failed: {title[:70]}...")
+
+    # Mirror the same alert as instant phone push via ntfy (best-effort)
+    if success and NTFY_ENABLED:
+        ntfy_message = format_whatsapp_message(analysis, url, original_title=title)
+        if not send_ntfy_push(ntfy_message):
+            logger.warning(f"{LOG_WARN} Telegram sent but ntfy push failed: {title[:70]}...")
 
     if success:
         processed_hashes.add(item_hash)
@@ -1576,7 +1626,7 @@ def run_digest() -> bool:
 
     message = format_digest_message(top, runners_up)
     if send_telegram_message(message):
-        if WHATSAPP_ENABLED:
+        if WHATSAPP_ENABLED or NTFY_ENABLED:
             wa_top = top["item"]
             wa_text = format_whatsapp_message(top["analysis"], wa_top.get("url", ""), wa_top.get("title", ""))
             if runners_up:
@@ -1588,8 +1638,10 @@ def run_digest() -> bool:
                     extra.append(f"+ {t}")
                 wa_text += "\n\nAlso big:\n" + "\n".join(extra)
             wa_text = "BIG HEADLINE - LAST 24 HOURS\n" + wa_text
-            if not send_whatsapp_message(wa_text):
+            if WHATSAPP_ENABLED and not send_whatsapp_message(wa_text):
                 logger.warning(f"{LOG_WARN} Digest sent to Telegram but WhatsApp failed")
+            if NTFY_ENABLED and not send_ntfy_push(wa_text):
+                logger.warning(f"{LOG_WARN} Digest sent to Telegram but ntfy push failed")
         LAST_DIGEST = today_ist
         save_processed_hashes()
         logger.info(f"{LOG_SENT} Digest posted for {today_ist}")
