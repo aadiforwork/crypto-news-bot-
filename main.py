@@ -1168,28 +1168,39 @@ def send_telegram_message(text: str) -> bool:
             pass  # Ignore console encoding issues
         return True
     
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": text,
-        "parse_mode": "Markdown",
-        "disable_web_page_preview": True
-    }
-    
-    try:
-        response = requests.post(TELEGRAM_API_URL, json=payload, timeout=15)
-        response.raise_for_status()
-        result = response.json()
-        
-        if result.get("ok"):
-            logger.info(f"{LOG_SENT} Telegram message sent successfully")
-            return True
-        else:
-            logger.error(f"Telegram API error: {result}")
-            return False
-            
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Telegram send error: {e}")
+    # TELEGRAM_CHAT_ID can hold multiple targets, comma-separated, e.g.
+    #   "-5597836192,919135909"   (group + private)
+    # Each target gets the same message. Sending to every target is best-effort:
+    # one bad id won't stop the others, and we still report overall success.
+    targets = [t.strip() for t in str(TELEGRAM_CHAT_ID).split(",") if t.strip()]
+    if not targets:
+        logger.error("Telegram send skipped: no TELEGRAM_CHAT_ID configured")
         return False
+
+    all_ok = True
+    for chat_id in targets:
+        payload = {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "Markdown",
+            "disable_web_page_preview": True
+        }
+        try:
+            response = requests.post(TELEGRAM_API_URL, json=payload, timeout=15)
+            response.raise_for_status()
+            result = response.json()
+
+            if result.get("ok"):
+                logger.info(f"{LOG_SENT} Telegram message sent to {chat_id}")
+            else:
+                logger.error(f"Telegram API error for {chat_id}: {result}")
+                all_ok = False
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Telegram send error for {chat_id}: {e}")
+            all_ok = False
+
+    return all_ok
 
 
 def format_whatsapp_message(analysis: Dict[str, Any], original_url: str, original_title: str = "") -> str:
