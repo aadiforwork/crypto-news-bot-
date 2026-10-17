@@ -1664,12 +1664,18 @@ def main():
     """Main event loop."""
     mode_str = "DRY-RUN" if DRY_RUN else ("LOCAL" if LOCAL_MODE else "LIVE")
     logger.info(f"{LOG_BOT} Crypto AI News Bot Starting... [{mode_str}]")
-    logger.info(f"{LOG_BOT} pid={os.getpid()} wa_enabled={WHATSAPP_ENABLED}")
+    logger.info(f"{LOG_BOT} pid={os.getpid()} wa_enabled={WHATSAPP_ENABLED} wa_provider={WHATSAPP_PROVIDER}")
     logger.info(f"{LOG_BOT} Polling interval: {POLL_INTERVAL}s")
     if LOCAL_MODE or DRY_RUN:
         logger.info(f"{LOG_BOT} Analyzer: local keyword filter (Hinglish templates, no API)")
     else:
-        logger.info(f"{LOG_BOT} Model: {MODEL_NAME}")
+        _active_model = {
+            "groq": GROQ_MODEL,
+            "gemini": GEMINI_MODEL,
+            "openrouter": OPENROUTER_MODEL,
+            "ollama": OLLAMA_MODEL,
+        }.get(LLM_PROVIDER, "unknown")
+        logger.info(f"{LOG_BOT} Model: {LLM_PROVIDER}/{_active_model}")
     logger.info(f"{LOG_RSS} RSS Feeds: {len(CRYPTO_RSS_FEEDS)} sources")
     logger.info(f"{LOG_MACRO} Macro Calendar: Forex Factory (High-Impact USD)")
     if RUN_ONCE:
