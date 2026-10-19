@@ -51,6 +51,9 @@ jobs:
           WHATSAPP_APIKEY: ${{ secrets.WHATSAPP_APIKEY }}
           WHATSAPP_CLOUD_TOKEN: ${{ secrets.WHATSAPP_CLOUD_TOKEN }}
           WHATSAPP_CLOUD_PHONE_ID: ${{ secrets.WHATSAPP_CLOUD_PHONE_ID }}
+          WHATSAPP_TWILIO_SID: ${{ secrets.WHATSAPP_TWILIO_SID }}
+          WHATSAPP_TWILIO_TOKEN: ${{ secrets.WHATSAPP_TWILIO_TOKEN }}
+          WHATSAPP_TWILIO_FROM: ${{ secrets.WHATSAPP_TWILIO_FROM }}
           NTFY_ENABLED: ${{ secrets.NTFY_ENABLED }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: python main.py --digest

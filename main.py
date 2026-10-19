@@ -88,6 +88,10 @@ WHATSAPP_APIKEY = os.getenv("WHATSAPP_APIKEY", "")    # CallMeBot se mila apikey
 # Official Meta WhatsApp Cloud API (developers.facebook.com se):
 WHATSAPP_CLOUD_TOKEN = os.getenv("WHATSAPP_CLOUD_TOKEN", "")        # access token
 WHATSAPP_CLOUD_PHONE_ID = os.getenv("WHATSAPP_CLOUD_PHONE_ID", "")  # test number ka Phone Number ID
+# Twilio WhatsApp (personal number OK via Sandbox - no business account needed)
+WHATSAPP_TWILIO_SID = os.getenv("WHATSAPP_TWILIO_SID", "")          # Account SID
+WHATSAPP_TWILIO_TOKEN = os.getenv("WHATSAPP_TWILIO_TOKEN", "")      # Auth Token
+WHATSAPP_TWILIO_FROM = os.getenv("WHATSAPP_TWILIO_FROM", "")        # e.g. whatsapp:+14155238886
 
 # Instant phone push via ntfy.sh (FREE, no signup, no stranger numbers, no business account)
 # Sirf app install + topic subscribe. Telegram jaisa instant notification phone pe.
@@ -1265,9 +1269,42 @@ def _send_whatsapp_cloudapi(text: str) -> bool:
         return False
 
 
+def _send_whatsapp_twilio(text: str) -> bool:
+    """Send via Twilio WhatsApp API (Sandbox works with a personal number,
+    no Meta Business account needed). Never raises."""
+    if not WHATSAPP_TWILIO_SID or not WHATSAPP_TWILIO_TOKEN or not WHATSAPP_TWILIO_FROM:
+        logger.warning(f"{LOG_WARN} Twilio selected but WHATSAPP_TWILIO_SID/TOKEN/FROM missing - skipping")
+        return False
+    if not WHATSAPP_PHONE:
+        logger.warning(f"{LOG_WARN} WHATSAPP_PHONE (receiver number) missing - skipping")
+        return False
+    try:
+        to = WHATSAPP_PHONE.strip()
+        if not to.startswith("+"):
+            to = "+" + to
+        response = requests.post(
+            f"https://api.twilio.com/2010-04-01/Accounts/{WHATSAPP_TWILIO_SID}/Messages.json",
+            auth=(WHATSAPP_TWILIO_SID, WHATSAPP_TWILIO_TOKEN),
+            data={
+                "From": WHATSAPP_TWILIO_FROM,
+                "To": f"whatsapp:{to}",
+                "Body": text[:1500],  # Twilio WhatsApp body limit is 1600 chars
+            },
+            timeout=25,
+        )
+        if response.status_code in (200, 201):
+            logger.info(f"{LOG_SENT} WhatsApp (Twilio) message sent successfully")
+            return True
+        logger.warning(f"{LOG_WARN} Twilio WhatsApp failed: HTTP {response.status_code}: {response.text[:300]}")
+        return False
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"{LOG_WARN} Twilio WhatsApp error: {e}")
+        return False
+
+
 def send_whatsapp_message(text: str) -> bool:
     """Send alert to WhatsApp. Provider picked by WHATSAPP_PROVIDER env:
-    "callmebot" (FREE, easy) or "cloudapi" (official Meta API).
+    "callmebot" (FREE, easy) / "twilio" (personal number OK) / "cloudapi" (Meta Business).
     Best-effort: never raises, returns False on any failure (Telegram remains primary)."""
 
     if not WHATSAPP_ENABLED:
@@ -1287,6 +1324,9 @@ def send_whatsapp_message(text: str) -> bool:
 
     if WHATSAPP_PROVIDER == "cloudapi":
         return _send_whatsapp_cloudapi(text)
+
+    if WHATSAPP_PROVIDER == "twilio":
+        return _send_whatsapp_twilio(text)
 
     if not WHATSAPP_PHONE or not WHATSAPP_APIKEY:
         logger.warning(f"{LOG_WARN} WhatsApp enabled but WHATSAPP_PHONE/WHATSAPP_APIKEY missing - skipping")
