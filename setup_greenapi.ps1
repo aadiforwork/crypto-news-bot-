@@ -43,14 +43,43 @@ function Set-EnvValue {
 
 Write-Host ""
 Write-Host "1/4  Instance state check kar raha hoon (QR scan hua ya nahi)..." -ForegroundColor Cyan
-try {
-    $state = (Invoke-RestMethod -Uri "https://api.green-api.com/waInstance$IdInstance/getStateInstance/$ApiToken" -TimeoutSec 25).stateInstance
-    Write-Host "     state = $state" -ForegroundColor Green
-    if ($state -ne "authorized") {
-        Write-Host "     ATTENTION: state '$state' hai. Console me QR scan karo, phir dobara chalao." -ForegroundColor Yellow
+# Naye instances ka apna host hota hai (e.g. 7103.api.greenapi.com) - dono try karo
+$hosts = @("https://api.green-api.com")
+$prefix = $IdInstance.Substring(0, [Math]::Min(4, $IdInstance.Length))
+if ($prefix -match '^\d{4}$') { $hosts += "https://$prefix.api.greenapi.com" }
+
+$base = $null
+$state = ""
+foreach ($h in $hosts) {
+    try {
+        $r = Invoke-RestMethod -Uri "$h/waInstance$IdInstance/getStateInstance/$ApiToken" -TimeoutSec 25
+        $base = $h
+        if ($null -eq $r) { $state = "creating (null)" } else { $state = "$($r.stateInstance)" }
+        break
+    } catch {
+        Write-Host "     $h -> fail ($($_.Exception.Message))" -ForegroundColor DarkGray
     }
-} catch {
-    throw "Green API credentials galat lag rahe hain (ID/ApiToken check karo): $($_.Exception.Message)"
+}
+if (-not $base) {
+    throw "Green API credentials galat lag rahe hain (ID Instance / ApiToken check karo)."
+}
+Write-Host "     host  = $base" -ForegroundColor Green
+Write-Host "     state = $state" -ForegroundColor Green
+if ($state -eq "notAuthorized") {
+    Write-Host ""
+    Write-Host "     QR scan baaki hai. Ye link kholo (browser me QR dikhega):" -ForegroundColor Yellow
+    Write-Host "     $base/waInstance$IdInstance/qr/$ApiToken" -ForegroundColor Yellow
+    Write-Host "     Phir WhatsApp -> Linked devices -> Link a device" -ForegroundColor Yellow
+    Write-Host "     Scan ke baad ye script dobara chalao." -ForegroundColor Yellow
+}
+if ($state -eq "yellowCard" -or $state -eq "suspended") {
+    Write-Host "     ATTENTION: number flag ho gaya hai. Console me verify/support se baat karo." -ForegroundColor Red
+}
+if ($state -ne "authorized") {
+    Write-Host ""
+    Write-Host "Pehle QR scan complete karo (ya 2-5 min wait karo agar instance ban raha hai)," -ForegroundColor Yellow
+    Write-Host "phir ye script dobara chalao. Abhi kuch set nahi kiya." -ForegroundColor Yellow
+    exit 1
 }
 
 Write-Host ""
@@ -65,6 +94,7 @@ Set-EnvValue $envFile "WHATSAPP_PROVIDER" "greenapi"
 Set-EnvValue $envFile "WHATSAPP_PHONE" $Phone
 Set-EnvValue $envFile "WHATSAPP_GREEN_ID" $IdInstance
 Set-EnvValue $envFile "WHATSAPP_GREEN_TOKEN" $ApiToken
+Set-EnvValue $envFile "WHATSAPP_GREEN_URL" $base
 Write-Host "     done (local .env)" -ForegroundColor Green
 
 Write-Host ""

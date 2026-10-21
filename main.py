@@ -1406,17 +1406,54 @@ def _send_whatsapp_twilio(text: str) -> bool:
         return False
 
 
-def _green_api_url(method: str) -> str:
-    return (f"{WHATSAPP_GREEN_URL}/waInstance{WHATSAPP_GREEN_ID}"
+_GREEN_HOST_CACHE = ""
+
+
+def _green_host_candidates() -> List[str]:
+    """Green API hosts to try. Naye instances ka apna host hota hai (e.g. 7103.api.greenapi.com),
+    isliye hardcode nahi kar sakte."""
+    hosts: List[str] = []
+    if WHATSAPP_GREEN_URL and WHATSAPP_GREEN_URL != "https://api.green-api.com":
+        hosts.append(WHATSAPP_GREEN_URL)
+    hosts.append("https://api.green-api.com")
+    prefix = (WHATSAPP_GREEN_ID or "")[:4]
+    if prefix.isdigit():
+        hosts.append(f"https://{prefix}.api.greenapi.com")
+    seen: Set[str] = set()
+    return [h for h in hosts if not (h in seen or seen.add(h))]
+
+
+def _green_api_url(method: str, host: str = "") -> str:
+    base = host or _GREEN_HOST_CACHE or WHATSAPP_GREEN_URL
+    return (f"{base.rstrip('/')}/waInstance{WHATSAPP_GREEN_ID}"
             f"/{method}/{WHATSAPP_GREEN_TOKEN}")
+
+
+def _green_resolve_host() -> str:
+    """Find the host that actually serves this instance. Cached per process."""
+    global _GREEN_HOST_CACHE
+    if _GREEN_HOST_CACHE:
+        return _GREEN_HOST_CACHE
+    for host in _green_host_candidates():
+        try:
+            response = requests.get(_green_api_url("getStateInstance", host), timeout=15)
+        except requests.exceptions.RequestException:
+            continue
+        # 401 = galat token (host sahi hai), 200 = sahi host mil gaya
+        if response.status_code in (200, 401, 404):
+            _GREEN_HOST_CACHE = host
+            return host
+    _GREEN_HOST_CACHE = WHATSAPP_GREEN_URL or "https://api.green-api.com"
+    return _GREEN_HOST_CACHE
 
 
 def greenapi_state() -> str:
     """Return Green API instance state ('authorized', 'notAuthorized', ...) or ''."""
     if not WHATSAPP_GREEN_ID or not WHATSAPP_GREEN_TOKEN:
         return ""
+    host = _green_resolve_host()
     try:
-        response = requests.get(_green_api_url("getStateInstance"), timeout=20)
+        response = requests.get(_green_api_url("getStateInstance", host), timeout=20)
         if response.status_code == 200:
             return str(response.json().get("stateInstance", ""))
         logger.warning(f"{LOG_WARN} Green API state check HTTP {response.status_code}: {response.text[:200]}")
@@ -1441,9 +1478,10 @@ def _send_whatsapp_greenapi(text: str) -> bool:
     phone = WHATSAPP_PHONE.strip()
     chat_id = phone if "@" in phone else f"{phone}@c.us"
 
+    host = _green_resolve_host()
     try:
         response = requests.post(
-            _green_api_url("sendMessage"),
+            _green_api_url("sendMessage", host),
             json={"chatId": chat_id, "message": text[:20000]},
             timeout=25,
         )
