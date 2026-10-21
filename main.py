@@ -31,7 +31,7 @@ import feedparser
 import hashlib
 import argparse
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any, Set, List
+from typing import Optional, Dict, Any, Set, List, Tuple
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -90,6 +90,14 @@ WHATSAPP_APIKEY = os.getenv("WHATSAPP_APIKEY", "")    # CallMeBot se mila apikey
 # Official Meta WhatsApp Cloud API (developers.facebook.com se):
 WHATSAPP_CLOUD_TOKEN = os.getenv("WHATSAPP_CLOUD_TOKEN", "")        # access token
 WHATSAPP_CLOUD_PHONE_ID = os.getenv("WHATSAPP_CLOUD_PHONE_ID", "")  # test number ka Phone Number ID
+# Meta rule: business free-form text sirf 24-hour customer service window ke andar bhej
+# sakta hai. Uske bahar APPROVED TEMPLATE chahiye. Modes:
+#   auto     = pehle text try karo, window band ho to template pe fall back (default)
+#   text     = sirf free-form text (free, par window ke bahar fail)
+#   template = hamesha approved template (paid, par kabhi fail nahi)
+WHATSAPP_CLOUD_MODE = os.getenv("WHATSAPP_CLOUD_MODE", "auto").lower()
+WHATSAPP_CLOUD_TEMPLATE = os.getenv("WHATSAPP_CLOUD_TEMPLATE", "")  # e.g. crypto_alert
+WHATSAPP_CLOUD_TEMPLATE_LANG = os.getenv("WHATSAPP_CLOUD_TEMPLATE_LANG", "en")
 # Twilio WhatsApp (personal number OK via Sandbox - no business account needed)
 WHATSAPP_TWILIO_SID = os.getenv("WHATSAPP_TWILIO_SID", "")          # Account SID
 WHATSAPP_TWILIO_TOKEN = os.getenv("WHATSAPP_TWILIO_TOKEN", "")      # Auth Token
@@ -1237,14 +1245,8 @@ def format_whatsapp_message(analysis: Dict[str, Any], original_url: str, origina
     return "\n".join(lines)
 
 
-def _send_whatsapp_cloudapi(text: str) -> bool:
-    """Send via official Meta WhatsApp Cloud API. Never raises."""
-    if not WHATSAPP_CLOUD_TOKEN or not WHATSAPP_CLOUD_PHONE_ID:
-        logger.warning(f"{LOG_WARN} Cloud API selected but WHATSAPP_CLOUD_TOKEN/PHONE_ID missing - skipping")
-        return False
-    if not WHATSAPP_PHONE:
-        logger.warning(f"{LOG_WARN} WHATSAPP_PHONE (receiver number) missing - skipping")
-        return False
+def _cloud_api_post(payload: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+    """POST one payload to Meta Cloud API. Returns (ok, error_dict). Never raises."""
     try:
         response = requests.post(
             f"https://graph.facebook.com/v22.0/{WHATSAPP_CLOUD_PHONE_ID}/messages",
@@ -1252,23 +1254,117 @@ def _send_whatsapp_cloudapi(text: str) -> bool:
                 "Authorization": f"Bearer {WHATSAPP_CLOUD_TOKEN}",
                 "Content-Type": "application/json",
             },
-            json={
-                "messaging_product": "whatsapp",
-                "recipient_type": "individual",
-                "to": WHATSAPP_PHONE,
-                "type": "text",
-                "text": {"preview_url": True, "body": text[:4000]},
-            },
-            timeout=20,
+            json=payload,
+            timeout=25,
         )
         if response.status_code == 200:
-            logger.info(f"{LOG_SENT} WhatsApp (Cloud API) message sent successfully")
-            return True
-        logger.warning(f"{LOG_WARN} WhatsApp Cloud API failed: HTTP {response.status_code}: {response.text[:300]}")
-        return False
+            return True, {}
+        try:
+            err = response.json().get("error", {}) or {}
+        except ValueError:
+            err = {}
+        if not isinstance(err, dict):
+            err = {}
+        err.setdefault("http_status", response.status_code)
+        logger.warning(f"{LOG_WARN} Cloud API HTTP {response.status_code}: {response.text[:300]}")
+        return False, err
     except requests.exceptions.RequestException as e:
-        logger.warning(f"{LOG_WARN} WhatsApp Cloud API error: {e}")
+        logger.warning(f"{LOG_WARN} Cloud API request error: {e}")
+        return False, {"message": str(e)}
+
+
+def _cloudapi_template_params(analysis: Optional[Dict[str, Any]], url: str,
+                              fallback_text: str) -> List[str]:
+    """Map one analysis onto the 5 body placeholders of the approved template.
+
+    Template body (Meta me isi order me banao):
+        🚨 {{1}} ALERT
+        {{2}}
+        {{3}}
+        Impact: {{4}}
+        Source: {{5}}
+    """
+    if not analysis:
+        return [s[:900] for s in fallback_text.split("\n")[:5]] or [fallback_text[:900]]
+
+    category = str(analysis.get("category", "NEWS"))[:40]
+    headline = str(analysis.get("headline", "") or "")[:900]
+    summary = analysis.get("summary", []) or []
+    bullets = " \u2022 ".join(str(s).strip() for s in summary[:3])[:900] or headline
+    impact = str(analysis.get("impact", "MEDIUM"))[:20]
+    source = str(analysis.get("source_name", "Source"))[:120]
+    if url:
+        source = f"{source} - {url}"
+    return [category, headline, bullets, impact, source[:900]]
+
+
+def _send_cloudapi_template(analysis: Optional[Dict[str, Any]], url: str, fallback_text: str) -> bool:
+    """Send the approved utility template. Used when the 24h window is closed."""
+    if not WHATSAPP_CLOUD_TEMPLATE:
+        logger.warning(f"{LOG_WARN} 24h window closed but WHATSAPP_CLOUD_TEMPLATE not set - skipping")
         return False
+
+    params = _cloudapi_template_params(analysis, url, fallback_text)
+    ok, err = _cloud_api_post({
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": WHATSAPP_PHONE,
+        "type": "template",
+        "template": {
+            "name": WHATSAPP_CLOUD_TEMPLATE,
+            "language": {"code": WHATSAPP_CLOUD_TEMPLATE_LANG},
+            "components": [{
+                "type": "body",
+                "parameters": [{"type": "text", "text": p[:1024]} for p in params],
+            }],
+        },
+    })
+    if ok:
+        logger.info(f"{LOG_SENT} WhatsApp (Cloud API template '{WHATSAPP_CLOUD_TEMPLATE}') sent successfully")
+        return True
+    logger.warning(f"{LOG_WARN} WhatsApp template failed: {str(err.get('message', ''))[:200]}")
+    return False
+
+
+def _send_whatsapp_cloudapi(text: str, analysis: Optional[Dict[str, Any]] = None,
+                            url: str = "") -> bool:
+    """Send via official Meta WhatsApp Cloud API. Never raises.
+
+    Mode "auto" (default): free-form text pehle (24h window ke andar free hota hai).
+    Agar Meta bole "re-engagement message" (window band), to approved template se retry.
+    """
+    if not WHATSAPP_CLOUD_TOKEN or not WHATSAPP_CLOUD_PHONE_ID:
+        logger.warning(f"{LOG_WARN} Cloud API selected but WHATSAPP_CLOUD_TOKEN/PHONE_ID missing - skipping")
+        return False
+    if not WHATSAPP_PHONE:
+        logger.warning(f"{LOG_WARN} WHATSAPP_PHONE (receiver number) missing - skipping")
+        return False
+
+    if WHATSAPP_CLOUD_MODE == "template":
+        return _send_cloudapi_template(analysis, url, text)
+
+    ok, err = _cloud_api_post({
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": WHATSAPP_PHONE,
+        "type": "text",
+        "text": {"preview_url": True, "body": text[:4000]},
+    })
+    if ok:
+        logger.info(f"{LOG_SENT} WhatsApp (Cloud API) message sent successfully")
+        return True
+
+    # 131047 / 470 = outside the 24-hour customer service window
+    code = err.get("code")
+    outside_window = code in (131047, 470) or err.get("error_subcode") == 2018278
+    if WHATSAPP_CLOUD_MODE == "auto" and WHATSAPP_CLOUD_TEMPLATE and outside_window:
+        logger.info(f"{LOG_BOT} 24h window closed - retrying with approved template")
+        return _send_cloudapi_template(analysis, url, text)
+
+    if outside_window and not WHATSAPP_CLOUD_TEMPLATE:
+        logger.warning(f"{LOG_WARN} 24h window closed. Meta template banake "
+                       f"WHATSAPP_CLOUD_TEMPLATE set karo, warna WhatsApp alerts fail honge.")
+    return False
 
 
 def _send_whatsapp_twilio(text: str) -> bool:
@@ -1304,9 +1400,11 @@ def _send_whatsapp_twilio(text: str) -> bool:
         return False
 
 
-def send_whatsapp_message(text: str) -> bool:
+def send_whatsapp_message(text: str, analysis: Optional[Dict[str, Any]] = None,
+                          url: str = "") -> bool:
     """Send alert to WhatsApp. Provider picked by WHATSAPP_PROVIDER env:
     "callmebot" (FREE, easy) / "twilio" (personal number OK) / "cloudapi" (Meta Business).
+    `analysis` + `url` sirf Cloud API template ke liye chahiye (Meta 24h window ke bahar).
     Best-effort: never raises, returns False on any failure (Telegram remains primary)."""
 
     if not WHATSAPP_ENABLED:
@@ -1325,7 +1423,7 @@ def send_whatsapp_message(text: str) -> bool:
         return True
 
     if WHATSAPP_PROVIDER == "cloudapi":
-        return _send_whatsapp_cloudapi(text)
+        return _send_whatsapp_cloudapi(text, analysis=analysis, url=url)
 
     if WHATSAPP_PROVIDER == "twilio":
         return _send_whatsapp_twilio(text)
@@ -1413,11 +1511,19 @@ def run_test_alert() -> None:
     print(f"  Telegram : {'OK' if tg_ok else 'FAILED'}")
 
     if WHATSAPP_ENABLED:
-        wa_ok = send_whatsapp_message(text)
+        sample = {
+            "category": "TEST",
+            "headline": "Test alert - ye message aa gaya matlab WhatsApp sahi chal raha hai",
+            "summary": ["Ye ek dummy news item hai", "Koi asli alert nahi hai", "Ignore kar do"],
+            "impact": "LOW",
+            "source_name": "Crypto Bot",
+        }
+        wa_ok = send_whatsapp_message(text, sample, "https://example.com")
         print(f"  WhatsApp : {'OK' if wa_ok else 'FAILED'} (provider={WHATSAPP_PROVIDER or 'callmebot'})")
         if not wa_ok:
             if WHATSAPP_PROVIDER == "cloudapi":
                 print("             check WHATSAPP_CLOUD_TOKEN + WHATSAPP_CLOUD_PHONE_ID")
+                print("             window band ho to WHATSAPP_CLOUD_TEMPLATE bhi chahiye")
             elif WHATSAPP_PROVIDER == "twilio":
                 print("             check WHATSAPP_TWILIO_SID / _TOKEN / _FROM")
             else:
@@ -1493,7 +1599,7 @@ def process_news_item(item: Dict[str, Any]) -> bool:
     # Mirror the same alert to WhatsApp (best-effort, Telegram stays primary)
     if success and WHATSAPP_ENABLED:
         wa_message = format_whatsapp_message(analysis, url, original_title=title)
-        if not send_whatsapp_message(wa_message):
+        if not send_whatsapp_message(wa_message, analysis, url):
             logger.warning(f"{LOG_WARN} Telegram sent but WhatsApp failed: {title[:70]}...")
 
     # Mirror the same alert as instant phone push via ntfy (best-effort)
@@ -1736,7 +1842,7 @@ def run_digest() -> bool:
                     extra.append(f"+ {t}")
                 wa_text += "\n\nAlso big:\n" + "\n".join(extra)
             wa_text = "BIG HEADLINE - LAST 24 HOURS\n" + wa_text
-            if WHATSAPP_ENABLED and not send_whatsapp_message(wa_text):
+            if WHATSAPP_ENABLED and not send_whatsapp_message(wa_text, top["analysis"], wa_top.get("url", "")):
                 logger.warning(f"{LOG_WARN} Digest sent to Telegram but WhatsApp failed")
             if NTFY_ENABLED and not send_ntfy_push(wa_text):
                 logger.warning(f"{LOG_WARN} Digest sent to Telegram but ntfy push failed")
