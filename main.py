@@ -43,12 +43,14 @@ parser.add_argument("--dry-run", action="store_true", help="Test mode: fetch + a
 parser.add_argument("--once", action="store_true", help="Run one polling cycle and exit")
 parser.add_argument("--local", action="store_true", help="Local mode: keyword-based Hinglish analysis + REAL Telegram sending (no LLM API needed)")
 parser.add_argument("--digest", action="store_true", help="Digest mode: post BIG HEADLINE of last 24h (runs once daily)")
+parser.add_argument("--test-alert", action="store_true", help="Send one test message to Telegram + WhatsApp + ntfy and exit")
 args = parser.parse_args()
 
 DRY_RUN = args.dry_run
 RUN_ONCE = args.once
 LOCAL_MODE = args.local
 DIGEST_MODE = args.digest
+TEST_ALERT = args.test_alert
 
 # ==================== CONFIGURATION ====================
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -1389,6 +1391,51 @@ def send_ntfy_push(text: str) -> bool:
         return False
 
 
+def run_test_alert() -> None:
+    """Send one test message to every enabled channel and print a per-channel result.
+
+    Useful on GitHub Actions where you cannot poke around locally: just trigger
+    the "Test Alert" workflow and read the job log. Telegram is required; the
+    WhatsApp / ntfy lines just tell you whether those mirrors are wired up.
+    """
+    text = (
+        "*TEST ALERT*\n\n"
+        "Alert system check chal raha hai.\n"
+        "Ye message aa gaya matlab ye channel sahi kaam kar raha hai.\n\n"
+        "#test"
+    )
+
+    print("=" * 60)
+    print("TEST ALERT - channel wise result")
+    print("=" * 60)
+
+    tg_ok = send_telegram_message(text)
+    print(f"  Telegram : {'OK' if tg_ok else 'FAILED'}")
+
+    if WHATSAPP_ENABLED:
+        wa_ok = send_whatsapp_message(text)
+        print(f"  WhatsApp : {'OK' if wa_ok else 'FAILED'} (provider={WHATSAPP_PROVIDER or 'callmebot'})")
+        if not wa_ok:
+            if WHATSAPP_PROVIDER == "cloudapi":
+                print("             check WHATSAPP_CLOUD_TOKEN + WHATSAPP_CLOUD_PHONE_ID")
+            elif WHATSAPP_PROVIDER == "twilio":
+                print("             check WHATSAPP_TWILIO_SID / _TOKEN / _FROM")
+            else:
+                print("             check WHATSAPP_PHONE (91XXXXXXXXXX) + WHATSAPP_APIKEY")
+    else:
+        print("  WhatsApp : SKIPPED (WHATSAPP_ENABLED is not 'true')")
+
+    if NTFY_ENABLED:
+        ntfy_ok = send_ntfy_push(text)
+        print(f"  ntfy     : {'OK' if ntfy_ok else 'FAILED'}")
+        if not ntfy_ok:
+            print("             check NTFY_TOPIC")
+    else:
+        print("  ntfy     : SKIPPED (NTFY_ENABLED is not 'true')")
+
+    print("=" * 60)
+
+
 def process_news_item(item: Dict[str, Any]) -> bool:
     """Process a single news item: analyze and send if valid."""
     item_hash = generate_item_hash(item["title"], item["url"])
@@ -1721,7 +1768,12 @@ def main():
     if RUN_ONCE:
         logger.info(f"{LOG_BOT} RUN_ONCE mode: Single cycle then exit")
     logger.info("=" * 60)
-    
+
+    # Test-alert mode: verify every channel, then exit (no news fetch, no LLM)
+    if TEST_ALERT:
+        run_test_alert()
+        return
+
     if not validate_env():
         logger.error(f"{LOG_ERR} Environment validation failed. Check .env file.")
         return
