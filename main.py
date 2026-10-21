@@ -1423,7 +1423,7 @@ def run_test_alert() -> None:
             else:
                 print("             check WHATSAPP_PHONE (91XXXXXXXXXX) + WHATSAPP_APIKEY")
     else:
-        print("  WhatsApp : SKIPPED (WHATSAPP_ENABLED is not 'true')")
+        print("  WhatsApp : SKIPPED (WHATSAPP_ENABLED is off)")
 
     if NTFY_ENABLED:
         ntfy_ok = send_ntfy_push(text)
@@ -1431,7 +1431,7 @@ def run_test_alert() -> None:
         if not ntfy_ok:
             print("             check NTFY_TOPIC")
     else:
-        print("  ntfy     : SKIPPED (NTFY_ENABLED is not 'true')")
+        print("  ntfy     : SKIPPED (NTFY_ENABLED is off)")
 
     print("=" * 60)
 
