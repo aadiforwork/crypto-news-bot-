@@ -102,6 +102,12 @@ WHATSAPP_CLOUD_TEMPLATE_LANG = os.getenv("WHATSAPP_CLOUD_TEMPLATE_LANG", "en")
 WHATSAPP_TWILIO_SID = os.getenv("WHATSAPP_TWILIO_SID", "")          # Account SID
 WHATSAPP_TWILIO_TOKEN = os.getenv("WHATSAPP_TWILIO_TOKEN", "")      # Auth Token
 WHATSAPP_TWILIO_FROM = os.getenv("WHATSAPP_TWILIO_FROM", "")        # e.g. whatsapp:+14155238886
+# Green API - FREE "Developer" plan (1 instance, 3 chats, sendMessage unlimited).
+# Session Green API ke server pe rehta hai -> 24x7 PC ki zarurat NAHI. Bas ek baar QR scan.
+# green-api.com -> Console -> Create instance -> QR scan -> idInstance + ApiTokenInstance copy.
+WHATSAPP_GREEN_ID = os.getenv("WHATSAPP_GREEN_ID", "")              # 1101xxxxxx
+WHATSAPP_GREEN_TOKEN = os.getenv("WHATSAPP_GREEN_TOKEN", "")        # ApiTokenInstance
+WHATSAPP_GREEN_URL = os.getenv("WHATSAPP_GREEN_URL", "https://api.green-api.com").rstrip("/")
 
 # Instant phone push via ntfy.sh (FREE, no signup, no stranger numbers, no business account)
 # Sirf app install + topic subscribe. Telegram jaisa instant notification phone pe.
@@ -1400,10 +1406,62 @@ def _send_whatsapp_twilio(text: str) -> bool:
         return False
 
 
+def _green_api_url(method: str) -> str:
+    return (f"{WHATSAPP_GREEN_URL}/waInstance{WHATSAPP_GREEN_ID}"
+            f"/{method}/{WHATSAPP_GREEN_TOKEN}")
+
+
+def greenapi_state() -> str:
+    """Return Green API instance state ('authorized', 'notAuthorized', ...) or ''."""
+    if not WHATSAPP_GREEN_ID or not WHATSAPP_GREEN_TOKEN:
+        return ""
+    try:
+        response = requests.get(_green_api_url("getStateInstance"), timeout=20)
+        if response.status_code == 200:
+            return str(response.json().get("stateInstance", ""))
+        logger.warning(f"{LOG_WARN} Green API state check HTTP {response.status_code}: {response.text[:200]}")
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"{LOG_WARN} Green API state check error: {e}")
+    return ""
+
+
+def _send_whatsapp_greenapi(text: str) -> bool:
+    """Send via Green API (unofficial WhatsApp Web protocol). Never raises.
+
+    FREE Developer plan = 1 instance, 3 chats, sendMessage unlimited.
+    Session Green API ke server par chalta hai, isliye PC 24x7 on rakhne ki zarurat nahi.
+    """
+    if not WHATSAPP_GREEN_ID or not WHATSAPP_GREEN_TOKEN:
+        logger.warning(f"{LOG_WARN} Green API selected but WHATSAPP_GREEN_ID/TOKEN missing - skipping")
+        return False
+    if not WHATSAPP_PHONE:
+        logger.warning(f"{LOG_WARN} WHATSAPP_PHONE (receiver number) missing - skipping")
+        return False
+
+    phone = WHATSAPP_PHONE.strip()
+    chat_id = phone if "@" in phone else f"{phone}@c.us"
+
+    try:
+        response = requests.post(
+            _green_api_url("sendMessage"),
+            json={"chatId": chat_id, "message": text[:20000]},
+            timeout=25,
+        )
+        if response.status_code == 200:
+            logger.info(f"{LOG_SENT} WhatsApp (Green API) message sent successfully")
+            return True
+        logger.warning(f"{LOG_WARN} Green API send failed: HTTP {response.status_code}: {response.text[:300]}")
+        return False
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"{LOG_WARN} Green API send error: {e}")
+        return False
+
+
 def send_whatsapp_message(text: str, analysis: Optional[Dict[str, Any]] = None,
                           url: str = "") -> bool:
     """Send alert to WhatsApp. Provider picked by WHATSAPP_PROVIDER env:
-    "callmebot" (FREE, easy) / "twilio" (personal number OK) / "cloudapi" (Meta Business).
+    "callmebot" (FREE, easy) / "greenapi" (FREE, no 24x7 PC, unofficial)
+    / "twilio" (personal number OK) / "cloudapi" (Meta Business).
     `analysis` + `url` sirf Cloud API template ke liye chahiye (Meta 24h window ke bahar).
     Best-effort: never raises, returns False on any failure (Telegram remains primary)."""
 
@@ -1421,6 +1479,9 @@ def send_whatsapp_message(text: str, analysis: Optional[Dict[str, Any]] = None,
         except Exception:
             pass  # Ignore console encoding issues
         return True
+
+    if WHATSAPP_PROVIDER == "greenapi":
+        return _send_whatsapp_greenapi(text)
 
     if WHATSAPP_PROVIDER == "cloudapi":
         return _send_whatsapp_cloudapi(text, analysis=analysis, url=url)
@@ -1524,6 +1585,14 @@ def run_test_alert() -> None:
             if WHATSAPP_PROVIDER == "cloudapi":
                 print("             check WHATSAPP_CLOUD_TOKEN + WHATSAPP_CLOUD_PHONE_ID")
                 print("             window band ho to WHATSAPP_CLOUD_TEMPLATE bhi chahiye")
+            elif WHATSAPP_PROVIDER == "greenapi":
+                st = greenapi_state()
+                print(f"             instance state = {st or 'unknown'}")
+                if st == "notAuthorized":
+                    print("             Console me QR scan karo (WhatsApp -> Linked devices)")
+                elif st == "yellowCard":
+                    print("             Green API ne number flag kiya - console me verify karo")
+                print("             check WHATSAPP_GREEN_ID / WHATSAPP_GREEN_TOKEN / WHATSAPP_PHONE")
             elif WHATSAPP_PROVIDER == "twilio":
                 print("             check WHATSAPP_TWILIO_SID / _TOKEN / _FROM")
             else:
