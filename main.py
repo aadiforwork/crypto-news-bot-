@@ -59,6 +59,18 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 # LLM Provider Selection: ollama | gemini | groq | openrouter
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").lower()
 
+# Provider fallback: primary ki limit/error aaye to in providers ko order me try karo.
+# Sirf wahi use hote hain jinka API key set ho.
+LLM_FALLBACKS = [
+    p.strip().lower()
+    for p in os.getenv("LLM_FALLBACKS", "gemini,openrouter").split(",")
+    if p.strip()
+]
+
+# Sab LLM providers fail ho jayein (quota khatam / invalid key) to local keyword
+# analyzer se alert banao - taaki news aana band na ho. Band karna ho to false.
+LLM_LOCAL_FALLBACK = os.getenv("LLM_LOCAL_FALLBACK", "true").lower() in ("1", "true", "yes")
+
 # API Keys (set the one for your chosen provider)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -851,25 +863,50 @@ Analyze this crypto news item."""
 
     result: Optional[Dict[str, Any]] = None
 
-    # ============ OLLAMA (FREE, LOCAL, NO ACCOUNT) ============
-    if LLM_PROVIDER == "ollama":
-        result = _analyze_with_ollama(user_content)
+    # Primary provider pehle, phir fallbacks - ek ki quota/limit khatam ho to
+    # agla provider automatically try hota hai (config: LLM_FALLBACKS).
+    provider_order: List[str] = []
+    for _p in [LLM_PROVIDER] + LLM_FALLBACKS:
+        if _p and _p not in provider_order:
+            provider_order.append(_p)
 
-    # ============ GEMINI (FREE: 1500 req/day) ============
-    elif LLM_PROVIDER == "gemini":
-        result = _analyze_with_gemini(user_content)
+    for provider in provider_order:
+        if provider == "ollama":
+            result = _analyze_with_ollama(user_content)
+        elif provider == "gemini":
+            if not GEMINI_API_KEY:
+                continue
+            result = _analyze_with_gemini(user_content)
+        elif provider == "groq":
+            if not GROQ_API_KEY:
+                continue
+            result = _analyze_with_groq(user_content)
+        elif provider == "openrouter":
+            if not OPENROUTER_API_KEY:
+                continue
+            result = _analyze_with_openrouter(user_content)
+        else:
+            logger.error(f"Unknown LLM_PROVIDER: {provider}")
+            continue
 
-    # ============ GROQ (FREE, fast, generous) ============
-    elif LLM_PROVIDER == "groq":
-        result = _analyze_with_groq(user_content)
+        if isinstance(result, dict) and not result.get("__api_error__"):
+            if provider != LLM_PROVIDER:
+                logger.info(f"{LOG_AI} Fallback provider used: {provider}")
+            break
 
-    # ============ OPENROUTER (needs credits) ============
-    elif LLM_PROVIDER == "openrouter":
-        result = _analyze_with_openrouter(user_content)
+        # Is provider se kuch nahi mila - agla try karo (no long sleep)
+        logger.warning(f"{LOG_WARN} {provider} failed - trying next provider")
+        result = None
 
-    else:
-        logger.error(f"Unknown LLM_PROVIDER: {LLM_PROVIDER}")
-        return None
+    if not isinstance(result, dict) or result.get("__api_error__"):
+        result = None
+
+    if result is None:
+        if LLM_LOCAL_FALLBACK:
+            logger.warning(f"{LOG_WARN} All LLM providers failed - using local keyword analyzer")
+            result = mock_analyze_with_llm(title, description, source)
+        else:
+            return {"__api_error__": True}
 
     # Specificity guard: small/cheap models often return the same template
     # for a whole category (e.g. identical Regulation bullets for Coins.ph
@@ -961,11 +998,12 @@ def _analyze_with_groq(user_content: str) -> Optional[Dict[str, Any]]:
             except requests.exceptions.RequestException as e:
                 last_err = str(e)
                 status = getattr(getattr(e, "response", None), "status_code", None)
-                if status == 429 and attempt == 0:
-                    logger.warning("Groq rate-limited, cooling down 30s before retry")
-                    time.sleep(30)
-                else:
-                    logger.warning("Groq API error (attempt %d): %s", attempt + 1, e)
+                if status == 429:
+                    # Quota/limit khatam: 30s sleep mat karo, caller turant agla
+                    # provider try karega (LLM_FALLBACKS).
+                    logger.warning("Groq rate-limited (429) - switching to next provider")
+                    return {"__api_error__": True}
+                logger.warning("Groq API error (attempt %d): %s", attempt + 1, e)
         logger.error("Groq failed after 2 attempts: %s", last_err)
         return {"__api_error__": True}  # Transport failure, NOT a verdict - caller must retry later
     except Exception as e:
