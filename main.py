@@ -1085,6 +1085,8 @@ def _analyze_with_groq(user_content: str) -> Optional[Dict[str, Any]]:
                     logger.warning("Groq invalid JSON structure (%s) - trying next model", model)
                     break
                 if parsed is LLM_SKIP:
+                    if model != GROQ_MODEL:
+                        logger.info(f"{LOG_AI} Groq fallback model used: {model} (verdict: SKIP)")
                     return LLM_SKIP
 
                 if model != GROQ_MODEL:
