@@ -48,6 +48,8 @@ jobs:
           # Fallback provider (agar Groq ki quota khatam ho jaye)
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           LLM_FALLBACKS: gemini,openrouter
+          GROQ_FALLBACK_MODELS: openai/gpt-oss-120b,qwen/qwen3.8-27b
+          LLM_LOCAL_FALLBACK: "false"
           WHATSAPP_ENABLED: ${{ secrets.WHATSAPP_ENABLED }}
           WHATSAPP_PROVIDER: ${{ secrets.WHATSAPP_PROVIDER }}
           WHATSAPP_PHONE: ${{ secrets.WHATSAPP_PHONE }}

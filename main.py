@@ -67,9 +67,18 @@ LLM_FALLBACKS = [
     if p.strip()
 ]
 
-# Sab LLM providers fail ho jayein (quota khatam / invalid key) to local keyword
-# analyzer se alert banao - taaki news aana band na ho. Band karna ho to false.
-LLM_LOCAL_FALLBACK = os.getenv("LLM_LOCAL_FALLBACK", "true").lower() in ("1", "true", "yes")
+# Sab LLM providers fail ho jayein to local keyword analyzer? Default OFF -
+# local analyzer har news bhej deta hai aur Hinglish quality kam hai. Sirf tab
+# true karo jab "kuch bhi ho, news aani chahiye" ho.
+LLM_LOCAL_FALLBACK = os.getenv("LLM_LOCAL_FALLBACK", "false").lower() in ("1", "true", "yes")
+
+# Groq ke andar model-level fallback: ek model ki daily token limit (TPD) khatam
+# ho to agla model try hota hai (har model ki limit alag hoti hai).
+GROQ_FALLBACK_MODELS = [
+    m.strip()
+    for m in os.getenv("GROQ_FALLBACK_MODELS", "openai/gpt-oss-120b,qwen/qwen3.8-27b").split(",")
+    if m.strip()
+]
 
 # API Keys (set the one for your chosen provider)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -889,6 +898,11 @@ Analyze this crypto news item."""
             logger.error(f"Unknown LLM_PROVIDER: {provider}")
             continue
 
+        if result is LLM_SKIP:
+            # Model ne saaf mana kiya - fallback try mat karo, item skip
+            logger.info(f"{LOG_SKIP} LLM verdict: SKIP ({provider})")
+            return None
+
         if isinstance(result, dict) and not result.get("__api_error__"):
             if provider != LLM_PROVIDER:
                 logger.info(f"{LOG_AI} Fallback provider used: {provider}")
@@ -958,26 +972,34 @@ def _analyze_with_gemini(user_content: str) -> Optional[Dict[str, Any]]:
 
 
 def _analyze_with_groq(user_content: str) -> Optional[Dict[str, Any]]:
-    """Analyze using Groq API (FREE tier, very fast)."""
-    payload = {
-        "model": GROQ_MODEL,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_content}
-        ],
-        "temperature": 0.1,
-        "max_tokens": 1000,
-        "response_format": {"type": "json_object"}
-    }
-    
+    """Analyze using Groq API (FREE tier, very fast).
+
+    Model-level fallback: primary model ki daily token limit (TPD) khatam ho to
+    agla model try hota hai (GROQ_FALLBACK_MODELS), kyunki har model ki limit alag hai.
+    """
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json"
     }
-    
-    try:
-        last_err = None
-        for attempt in range(2):  # Retry once: Groq sometimes fails JSON validation transiently
+
+    models: List[str] = []
+    for m in [GROQ_MODEL] + GROQ_FALLBACK_MODELS:
+        if m and m not in models:
+            models.append(m)
+
+    for model in models:
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_content}
+            ],
+            "temperature": 0.1,
+            "max_tokens": 1000,
+            "response_format": {"type": "json_object"}
+        }
+
+        for attempt in range(2):  # Retry once for transient errors (5xx/timeout)
             try:
                 response = requests.post(GROQ_URL, json=payload, headers=headers, timeout=30)
                 response.raise_for_status()
@@ -986,30 +1008,34 @@ def _analyze_with_groq(user_content: str) -> Optional[Dict[str, Any]]:
                 content = result.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
 
                 try:
-                    return _parse_llm_response(content)
+                    parsed = _parse_llm_response(content)
                 except (ValueError, KeyError, AttributeError) as e:
-                    # Model answered but output unusable - burn it, don't retry forever
-                    logger.warning("Groq bad response structure, skipping: %s", e)
-                    return None
+                    # Model answered but output unusable - next model try karo
+                    logger.warning("Groq bad response structure (%s): %s", model, e)
+                    break
+
+                if parsed is None:
+                    logger.warning("Groq invalid JSON structure (%s) - trying next model", model)
+                    break
+                if parsed is LLM_SKIP:
+                    return LLM_SKIP
+
+                if model != GROQ_MODEL:
+                    logger.info(f"{LOG_AI} Groq fallback model used: {model}")
+                return parsed
 
             except requests.exceptions.Timeout:
-                last_err = "timeout"
-                logger.warning("Groq API timeout (attempt %d)", attempt + 1)
+                logger.warning("Groq API timeout (%s, attempt %d)", model, attempt + 1)
             except requests.exceptions.RequestException as e:
-                last_err = str(e)
                 status = getattr(getattr(e, "response", None), "status_code", None)
                 if status == 429:
-                    # Quota/limit khatam: 30s sleep mat karo, caller turant agla
-                    # provider try karega (LLM_FALLBACKS).
-                    logger.warning("Groq rate-limited (429) - switching to next provider")
-                    return {"__api_error__": True}
-                logger.warning("Groq API error (attempt %d): %s", attempt + 1, e)
-        logger.error("Groq failed after 2 attempts: %s", last_err)
-        return {"__api_error__": True}  # Transport failure, NOT a verdict - caller must retry later
-    except Exception as e:
-        logger.error(f"Groq analysis error: {e}")
+                    # Is model ki quota khatam - sleep mat karo, agla model try karo
+                    logger.warning("Groq %s rate-limited (429) - trying next model", model)
+                    break
+                logger.warning("Groq API error (%s, attempt %d): %s", model, attempt + 1, e)
 
-    return {"__api_error__": True}
+    logger.error("All Groq models failed")
+    return {"__api_error__": True}  # Transport/quota failure, NOT a verdict
 
 
 def _analyze_with_openrouter(user_content: str) -> Optional[Dict[str, Any]]:
@@ -1086,8 +1112,22 @@ def _analyze_with_ollama(user_content: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+class _LlmSkip:
+    """Sentinel: LLM ne confidently SKIP kaha (ye news alert ke layak nahi).
+    None se alag hai - None ka matlab provider fail hua (agla try karo)."""
+
+    def __repr__(self) -> str:  # debugging ke liye
+        return "LLM_SKIP"
+
+
+LLM_SKIP = _LlmSkip()
+
+
 def _parse_llm_response(content: str) -> Optional[Dict[str, Any]]:
-    """Parse and validate LLM response."""
+    """Parse and validate LLM response.
+
+    Returns: analysis dict (send alert), LLM_SKIP (clean skip), None (invalid).
+    """
     if content is None:
         content = ""
     content = content.strip()
@@ -1095,14 +1135,14 @@ def _parse_llm_response(content: str) -> Optional[Dict[str, Any]]:
     # Handle different response formats
     # Format 1: Direct "SKIP"
     if content == "SKIP":
-        return None
+        return LLM_SKIP
     
     # Format 2: JSON with response field: {"response": "SKIP"}
     try:
         parsed = json.loads(content)
         if isinstance(parsed, dict):
             if parsed.get("response") == "SKIP":
-                return None
+                return LLM_SKIP
             content = json.dumps(parsed)  # Re-serialize for parsing below
     except json.JSONDecodeError:
         pass  # Not JSON, use as-is
