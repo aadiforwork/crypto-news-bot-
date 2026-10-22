@@ -9,16 +9,32 @@
 #   3. Scan QR -> phone se WhatsApp -> Linked devices -> Link a device
 #   4. Instance page se ID Instance + ApiTokenInstance copy karo
 #
-# Usage (project folder me):
-#   .\setup_greenapi.ps1 -Phone 919876543210 -IdInstance 1101xxxxxx -ApiToken xxxxxxxx
+# Usage (project folder me) - ApiToken na do to secure prompt aayega:
+#   .\setup_greenapi.ps1 -Phone 919876543210 -IdInstance 1101xxxxxx
+#   (token ki jagah: PowerShell "ApiTokenInstance paste karo" pe paste karo - screen pe nahi dikhega,
+#    aur command history me bhi save nahi hoga)
 
 param(
     [Parameter(Mandatory = $true)][string]$Phone,
     [Parameter(Mandatory = $true)][string]$IdInstance,
-    [Parameter(Mandatory = $true)][string]$ApiToken
+    # -ApiToken optional: na do to script secure prompt se poochhega,
+    # taaki token command line / PowerShell history me na jaye.
+    [string]$ApiToken
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $ApiToken) {
+    $secureToken = Read-Host "ApiTokenInstance paste karo (screen pe nahi dikhega)" -AsSecureString
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
+    try {
+        $ApiToken = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    } finally {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    }
+}
+$ApiToken = "$ApiToken".Trim()
+if (-not $ApiToken) { throw "ApiToken khali hai - instance page se ApiTokenInstance copy karo." }
 
 $Phone = ($Phone -replace '[^\d]', '')
 if ($Phone.Length -lt 10) {
@@ -99,11 +115,17 @@ Write-Host "     done (local .env)" -ForegroundColor Green
 
 Write-Host ""
 Write-Host "3/4  GitHub secrets set kar raha hoon..." -ForegroundColor Cyan
-gh secret set WHATSAPP_ENABLED --body "true"
-gh secret set WHATSAPP_PROVIDER --body "greenapi"
-gh secret set WHATSAPP_PHONE --body $Phone
-gh secret set WHATSAPP_GREEN_ID --body $IdInstance
-gh secret set WHATSAPP_GREEN_TOKEN --body $ApiToken
+# Value stdin se jaati hai (--body se nahi) taaki token process arguments me na dikhe
+function Set-GhSecret {
+    param([string]$Name, [string]$Value)
+    $Value | gh secret set $Name
+    if ($LASTEXITCODE -ne 0) { throw "gh secret set $Name fail hua (gh auth status check karo)." }
+}
+Set-GhSecret "WHATSAPP_ENABLED" "true"
+Set-GhSecret "WHATSAPP_PROVIDER" "greenapi"
+Set-GhSecret "WHATSAPP_PHONE" $Phone
+Set-GhSecret "WHATSAPP_GREEN_ID" $IdInstance
+Set-GhSecret "WHATSAPP_GREEN_TOKEN" $ApiToken
 Write-Host "     done (Actions secrets)" -ForegroundColor Green
 
 Write-Host ""

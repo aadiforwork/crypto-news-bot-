@@ -1458,7 +1458,8 @@ def greenapi_state() -> str:
             return str(response.json().get("stateInstance", ""))
         logger.warning(f"{LOG_WARN} Green API state check HTTP {response.status_code}: {response.text[:200]}")
     except requests.exceptions.RequestException as e:
-        logger.warning(f"{LOG_WARN} Green API state check error: {e}")
+        # Sirf type log karo - exception message me poora URL hota hai (token ke saath)
+        logger.warning(f"{LOG_WARN} Green API state check error: {type(e).__name__}")
     return ""
 
 
@@ -1491,7 +1492,8 @@ def _send_whatsapp_greenapi(text: str) -> bool:
         logger.warning(f"{LOG_WARN} Green API send failed: HTTP {response.status_code}: {response.text[:300]}")
         return False
     except requests.exceptions.RequestException as e:
-        logger.warning(f"{LOG_WARN} Green API send error: {e}")
+        # Token URL path me hota hai, isliye exception message log mat karo
+        logger.warning(f"{LOG_WARN} Green API send error: {type(e).__name__}")
         return False
 
 
@@ -1518,8 +1520,13 @@ def send_whatsapp_message(text: str, analysis: Optional[Dict[str, Any]] = None,
             pass  # Ignore console encoding issues
         return True
 
+    # Green API abhi use nahi ho raha - dispatch band (helper code neeche intact hai).
+    # Wapas chalu karna ho to ye 3 lines replace karo:
+    #   if WHATSAPP_PROVIDER == "greenapi":
+    #       return _send_whatsapp_greenapi(text)
     if WHATSAPP_PROVIDER == "greenapi":
-        return _send_whatsapp_greenapi(text)
+        logger.warning(f"{LOG_WARN} WHATSAPP_PROVIDER=greenapi is PAUSED - skipping send")
+        return False
 
     if WHATSAPP_PROVIDER == "cloudapi":
         return _send_whatsapp_cloudapi(text, analysis=analysis, url=url)
@@ -1624,13 +1631,8 @@ def run_test_alert() -> None:
                 print("             check WHATSAPP_CLOUD_TOKEN + WHATSAPP_CLOUD_PHONE_ID")
                 print("             window band ho to WHATSAPP_CLOUD_TEMPLATE bhi chahiye")
             elif WHATSAPP_PROVIDER == "greenapi":
-                st = greenapi_state()
-                print(f"             instance state = {st or 'unknown'}")
-                if st == "notAuthorized":
-                    print("             Console me QR scan karo (WhatsApp -> Linked devices)")
-                elif st == "yellowCard":
-                    print("             Green API ne number flag kiya - console me verify karo")
-                print("             check WHATSAPP_GREEN_ID / WHATSAPP_GREEN_TOKEN / WHATSAPP_PHONE")
+                # Green API paused - diagnostics bhi skip
+                print("             Green API abhi PAUSED hai (main.py me dispatch off)")
             elif WHATSAPP_PROVIDER == "twilio":
                 print("             check WHATSAPP_TWILIO_SID / _TOKEN / _FROM")
             else:
