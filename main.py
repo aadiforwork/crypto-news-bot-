@@ -223,6 +223,9 @@ processed_hashes: Set[str] = set()
 # Story fingerprints already alerted (same story from different feeds = send once)
 processed_stories: List[frozenset] = []
 
+# Normalized headlines already alerted/seen (exact same headline from another feed = skip)
+processed_titles: Set[str] = set()
+
 # Cache for macro events to avoid re-sending same calendar events
 # (persisted to processed.json so restarts don't cause duplicate macro alerts)
 macro_event_cache: Dict[str, datetime] = {}
@@ -241,7 +244,7 @@ LAST_DIGEST = ""
 
 def load_processed_hashes() -> None:
     """Load previously processed hashes + story fingerprints from disk."""
-    global processed_hashes, processed_stories, LAST_DIGEST, macro_event_cache
+    global processed_hashes, processed_stories, processed_titles, LAST_DIGEST, macro_event_cache
     try:
         if os.path.exists(PROCESSED_FILE):
             with open(PROCESSED_FILE, "r", encoding="utf-8") as f:
@@ -254,6 +257,7 @@ def load_processed_hashes() -> None:
                     # New format: hashes + story fingerprints
                     processed_hashes = set(data.get("hashes", []))
                     processed_stories = [frozenset(s) for s in data.get("stories", [])]
+                    processed_titles = set(data.get("titles", []))
                     LAST_DIGEST = data.get("last_digest", "")
                     # Macro cache (ISO timestamps) - survives restarts, prevents duplicate macro alerts
                     macro_event_cache = {}
@@ -265,7 +269,7 @@ def load_processed_hashes() -> None:
                             macro_event_cache[k] = dt
                         except (ValueError, TypeError):
                             continue
-                    logger.info(f"{LOG_BOT} Loaded {len(processed_hashes)} hashes + {len(processed_stories)} stories + {len(macro_event_cache)} macro events from disk")
+                    logger.info(f"{LOG_BOT} Loaded {len(processed_hashes)} hashes + {len(processed_stories)} stories + {len(processed_titles)} headlines + {len(macro_event_cache)} macro events from disk")
     except Exception as e:
         logger.warning(f"Could not load processed hashes: {e}")
 
@@ -277,6 +281,7 @@ def save_processed_hashes() -> None:
             json.dump({
                 "hashes": sorted(processed_hashes),
                 "stories": [sorted(s) for s in processed_stories[-2000:]],
+                "titles": sorted(processed_titles)[-2000:],
                 "last_digest": LAST_DIGEST,
                 "macro_cache": {k: v.isoformat() for k, v in macro_event_cache.items()}
             }, f)
@@ -326,6 +331,30 @@ TITLE_STOPWORDS = {
     "as", "at", "by", "from", "is", "are", "was", "be", "has", "have",
     "says", "say", "new", "over", "after", "ahead", "amid", "vs",
 }
+
+
+# Feed/site names jo headline ke end me " - CoinDesk" / " | CryptoSlate" jaise aate hain
+SOURCE_SUFFIXES = {
+    "coindesk", "cointelegraph", "cryptoslate", "decrypt", "cryptobriefing",
+    "bitcoinist", "bitcoin magazine", "the block", "blockworks", "beincrypto",
+    "newsbtc", "ambcrypto", "cryptopotato", "coinjournal", "coingape",
+    "thedefiant", "dlnews", "cryptonews", "finance magnates", "u today",
+    "reuters", "bloomberg", "cnbc", "forbes", "yahoo finance",
+}
+
+
+def normalize_title(title: str) -> str:
+    """Headline ko dedupe ke liye normalize karo: lowercase, punctuation clean,
+    aur trailing source suffix (" - CoinDesk") hatao."""
+    import re
+    t = (title or "").strip()
+    m = re.match(r"^(.*\S)\s+[\-\|\u2013\u2014]\s+(.{2,30})$", t)
+    if m:
+        suffix = re.sub(r"[^a-z0-9 ]+", "", m.group(2).lower()).strip()
+        if suffix in SOURCE_SUFFIXES:
+            t = m.group(1)
+    t = re.sub(r"[^a-z0-9]+", " ", t.lower())
+    return re.sub(r"\s+", " ", t).strip()
 
 
 def title_fingerprint(title: str) -> frozenset:
@@ -625,9 +654,47 @@ def validate_env() -> bool:
     return True
 
 
-def generate_item_hash(title: str, url: str) -> str:
-    """Generate unique hash for deduplication based on title + URL."""
+_TRACKING_PARAMS = {
+    "ref", "ref_src", "referrer", "source", "fbclid", "gclid", "mc_cid", "mc_eid",
+    "amp", "output", "cmpid", "campaign", "at_medium", "at_campaign", "igshid",
+}
+
+
+def normalize_url(url: str) -> str:
+    """Same article ke URL variants ko ek jaisa banao: tracking params, www.,
+    trailing slash, http/https aur #fragment hata do (warna same news duplicate lagti hai)."""
+    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    try:
+        parts = urlsplit(raw)
+    except ValueError:
+        return raw.lower()
+
+    host = parts.netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
+
+    query = [
+        (k, v)
+        for k, v in parse_qsl(parts.query, keep_blank_values=False)
+        if not k.lower().startswith("utm_") and k.lower() not in _TRACKING_PARAMS
+    ]
+    path = parts.path.rstrip("/") or "/"
+    return urlunsplit(("https", host, path, urlencode(sorted(query)), ""))
+
+
+def legacy_item_hash(title: str, url: str) -> str:
+    """Purane processed.json ke hashes isi formula se bane the - compatibility ke liye."""
     content = f"{title.strip().lower()}|{url.strip().lower()}"
+    return hashlib.md5(content.encode()).hexdigest()[:16]
+
+
+def generate_item_hash(title: str, url: str) -> str:
+    """Generate unique hash for deduplication based on normalized title + URL."""
+    content = f"{normalize_title(title)}|{normalize_url(url)}"
     return hashlib.md5(content.encode()).hexdigest()[:16]
 
 
@@ -1752,9 +1819,14 @@ def run_test_alert() -> None:
 def process_news_item(item: Dict[str, Any]) -> bool:
     """Process a single news item: analyze and send if valid."""
     item_hash = generate_item_hash(item["title"], item["url"])
-    
-    # Skip if already processed
-    if item_hash in processed_hashes:
+    legacy_hash = legacy_item_hash(item["title"], item["url"])
+
+    # Mark as processed with BOTH hash formats (purana processed.json bhi match kare)
+    def _mark_processed() -> None:
+        processed_hashes.update((item_hash, legacy_hash))
+
+    # Skip if already processed (naya normalized hash ya purana hash)
+    if item_hash in processed_hashes or legacy_hash in processed_hashes:
         return False
     
     title = item.get("title", "").strip()
@@ -1765,12 +1837,23 @@ def process_news_item(item: Dict[str, Any]) -> bool:
     
     if not title:
         return False
-    
+
+    # HEADLINE-LEVEL DEDUP: bilkul wahi headline (kisi bhi feed se) pehle aa chuki hai?
+    # Source suffix / punctuation ignore hota hai, isliye "Bitcoin ... - CoinDesk" aur
+    # "Bitcoin ... | CryptoSlate" ek hi maani jaati hain.
+    title_key = normalize_title(title)
+    if title_key and title_key in processed_titles:
+        logger.info(f"{LOG_SKIP} Duplicate headline (already seen): {title[:70]}...")
+        _mark_processed()
+        return False
+
     # SKIP videos/podcasts by URL - never breaking news
     url_lower = url.lower()
     if "/videos/" in url_lower or "/video/" in url_lower or "/podcast" in url_lower:
         logger.info(f"{LOG_SKIP} Skipped (video/podcast content)")
-        processed_hashes.add(item_hash)
+        _mark_processed()
+        if title_key:
+            processed_titles.add(title_key)
         return False
     
     # STORY-LEVEL DEDUP: same story from another feed already alerted? Send once only.
@@ -1778,7 +1861,9 @@ def process_news_item(item: Dict[str, Any]) -> bool:
         fp = title_fingerprint(title)
         if is_duplicate_story(fp):
             logger.info(f"{LOG_SKIP} Duplicate story (already alerted from another feed): {title[:70]}...")
-            processed_hashes.add(item_hash)
+            _mark_processed()
+            if title_key:
+                processed_titles.add(title_key)
             return False
     
     logger.info(f"{LOG_AI} Analyzing [{item_type}]: {title[:80]}...")
@@ -1793,7 +1878,9 @@ def process_news_item(item: Dict[str, Any]) -> bool:
 
     if analysis is None:
         logger.info(f"{LOG_SKIP} Skipped (filtered by LLM)")
-        processed_hashes.add(item_hash)
+        _mark_processed()
+        if title_key:
+            processed_titles.add(title_key)
         # Cache macro events
         if item_type == "macro_event" and "cache_key" in item:
             macro_event_cache[item["cache_key"]] = datetime.now(timezone.utc)
@@ -1816,7 +1903,9 @@ def process_news_item(item: Dict[str, Any]) -> bool:
             logger.warning(f"{LOG_WARN} Telegram sent but ntfy push failed: {title[:70]}...")
 
     if success:
-        processed_hashes.add(item_hash)
+        _mark_processed()
+        if title_key:
+            processed_titles.add(title_key)
         # Remember story fingerprint so other feeds' copies are skipped
         if item_type == "crypto_news":
             processed_stories.append(title_fingerprint(title))
@@ -1835,7 +1924,7 @@ def impact_emoji(impact: str) -> str:
 
 def cleanup_old_data(max_hashes: int = 5000, max_cache_age_hours: int = 48):
     """Prevent memory bloat by limiting processed hashes and macro cache."""
-    global processed_hashes, processed_stories, macro_event_cache
+    global processed_hashes, processed_stories, processed_titles, macro_event_cache
     
     # Cleanup processed hashes
     if len(processed_hashes) > max_hashes:
@@ -1846,6 +1935,12 @@ def cleanup_old_data(max_hashes: int = 5000, max_cache_age_hours: int = 48):
     if len(processed_stories) > 2000:
         processed_stories = processed_stories[-2000:]
         logger.info(f"{LOG_CLEAN} Cleaned up story fingerprints, kept {len(processed_stories)}")
+
+    # Cleanup old headlines (keep latest 2000)
+    if len(processed_titles) > 2000:
+        # set unordered hai - sabse purane 2000 rakhne ke liye list slicing (approx)
+        processed_titles = set(list(processed_titles)[-2000:])
+        logger.info(f"{LOG_CLEAN} Cleaned up headlines, kept {len(processed_titles)}")
     
     # Cleanup old macro cache entries
     cutoff = datetime.now(timezone.utc) - timedelta(hours=max_cache_age_hours)

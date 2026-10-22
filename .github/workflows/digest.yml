@@ -8,7 +8,8 @@ on:
 
 concurrency:
   group: crypto-news-digest
-  cancel-in-progress: true
+  # false = chal raha digest beech me cancel nahi hoga (state save miss na ho)
+  cancel-in-progress: false
 
 permissions:
   contents: write  # Needed to save digest state back to repo
@@ -69,10 +70,27 @@ jobs:
         run: python main.py --digest
 
       - name: Save digest state
+        if: always()
         run: |
+          if [ ! -f processed.json ]; then echo "No processed.json - nothing to save"; exit 0; fi
+          cp processed.json /tmp/processed_run.json
           git config user.name "news-bot"
           git config user.email "news-bot@users.noreply.github.com"
-          git pull --rebase --autostash || true
-          git add processed.json || true
-          git diff --staged --quiet || git commit -m "Update digest state [skip ci]"
-          git push || echo "Nothing to push"
+          git fetch origin main
+          git reset --hard origin/main
+          python merge_processed_state.py /tmp/processed_run.json
+          git add processed.json
+          git diff --staged --quiet && { echo "State unchanged"; exit 0; }
+          git commit -m "Update digest state [skip ci]"
+          for i in 1 2 3 4 5; do
+            if git push; then echo "State pushed"; exit 0; fi
+            echo "Push race - retry $i"
+            git fetch origin main
+            git reset --hard origin/main
+            python merge_processed_state.py /tmp/processed_run.json
+            git add processed.json
+            git commit -m "Update digest state [skip ci]" || true
+            sleep 5
+          done
+          echo "::error::Could not push digest state after retries"
+          exit 1
