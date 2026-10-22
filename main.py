@@ -79,10 +79,12 @@ GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_M
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-# WhatsApp Alerts (FREE via CallMeBot - optional, Telegram stays primary)
-# Setup: phone me CallMeBot number save karo, usko WhatsApp pe
+# WhatsApp Alerts - ABHI PAUSED (zarurat nahi). Chalu karna ho to neeche wali
+# os.getenv line uncomment karke hard-coded False hatao.
+# Setup (jab wapas chalu karo): phone me CallMeBot number save karo, usko WhatsApp pe
 # "I allow callmebot to send me messages" bhejo, apikey milega.
-WHATSAPP_ENABLED = os.getenv("WHATSAPP_ENABLED", "false").lower() in ("1", "true", "yes")
+# WHATSAPP_ENABLED = os.getenv("WHATSAPP_ENABLED", "false").lower() in ("1", "true", "yes")
+WHATSAPP_ENABLED = False  # WhatsApp chunk commented out - Telegram only for now
 WHATSAPP_PHONE = os.getenv("WHATSAPP_PHONE", "")      # e.g. 919876543210 (country code + number, bina + ke)
 # Provider: "callmebot" (free, aasaan) ya "cloudapi" (official Meta API)
 WHATSAPP_PROVIDER = os.getenv("WHATSAPP_PROVIDER", "callmebot").lower()
@@ -1169,8 +1171,12 @@ def format_telegram_message(analysis: Dict[str, Any], original_url: str, origina
     return message
 
 
-def send_telegram_message(text: str) -> bool:
-    """Send formatted message to Telegram."""
+def send_telegram_message(text: str, targets: Optional[List[str]] = None) -> bool:
+    """Send formatted message to Telegram.
+
+    targets: optional explicit chat ids. Default = TELEGRAM_CHAT_ID (comma-separated).
+    Test alerts isse private ids pass karte hain taaki channel pe test post na jaye.
+    """
     
     # DRY-RUN: Print to console instead of sending
     if DRY_RUN:
@@ -1189,16 +1195,18 @@ def send_telegram_message(text: str) -> bool:
         return True
     
     # TELEGRAM_CHAT_ID can hold multiple targets, comma-separated, e.g.
-    #   "-5597836192,919135909"   (group + private)
+    #   "-5597836192,919135909"   (channel + private)
     # Each target gets the same message. Sending to every target is best-effort:
     # one bad id won't stop the others, and we still report overall success.
-    targets = [t.strip() for t in str(TELEGRAM_CHAT_ID).split(",") if t.strip()]
-    if not targets:
+    chat_ids = [t.strip() for t in str(TELEGRAM_CHAT_ID).split(",") if t.strip()]
+    if targets is not None:
+        chat_ids = [t.strip() for t in targets if t.strip()]
+    if not chat_ids:
         logger.error("Telegram send skipped: no TELEGRAM_CHAT_ID configured")
         return False
 
     all_ok = True
-    for chat_id in targets:
+    for chat_id in chat_ids:
         payload = {
             "chat_id": chat_id,
             "text": text,
@@ -1613,8 +1621,20 @@ def run_test_alert() -> None:
     print("TEST ALERT - channel wise result")
     print("=" * 60)
 
-    tg_ok = send_telegram_message(text)
-    print(f"  Telegram : {'OK' if tg_ok else 'FAILED'}")
+    # Test message CHANNEL pe nahi jayega: website news channel se fetch karti hai,
+    # isliye wahan test post dikhna nahi chahiye. Sirf private chat ids (jo "-" se
+    # start nahi hote) ko bhejte hain.
+    test_targets = [
+        t.strip() for t in str(TELEGRAM_CHAT_ID).split(",")
+        if t.strip() and not t.strip().startswith("-")
+    ]
+    if test_targets:
+        tg_ok = send_telegram_message(text, targets=test_targets)
+        print(f"  Telegram : {'OK' if tg_ok else 'FAILED'} -> {', '.join(test_targets)}")
+    else:
+        tg_ok = False
+        print("  Telegram : SKIPPED (koi private chat id nahi mila)")
+        print("             channel pe test nahi bhejte - TELEGRAM_CHAT_ID me apna personal id bhi daalo")
 
     if WHATSAPP_ENABLED:
         sample = {
