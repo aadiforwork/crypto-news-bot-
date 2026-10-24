@@ -1543,6 +1543,7 @@
     "d4933e54a28d9a89",
     "d49a2b0477dcc2b9",
     "d4ec6813409ce5f6",
+    "d50254a8a25b9f48",
     "d538514f5dd401a9",
     "d5838a19e292d33f",
     "d599fbea8b6ade92",
@@ -1574,6 +1575,7 @@
     "d832778bae0806bd",
     "d84b86886910b395",
     "d8562c7b937357e8",
+    "d86f08cb0e71d110",
     "d92f4656509ae252",
     "d93244b7f32141ea",
     "d94e6a438c650f45",
@@ -3737,6 +3739,16 @@
       "connect",
       "stablecoins",
       "unite"
+    ],
+    [
+      "coinbase",
+      "derivatives",
+      "futures",
+      "hours",
+      "maintenance",
+      "nine",
+      "pauses",
+      "trading"
     ]
   ],
   "titles": [
@@ -3871,6 +3883,7 @@
     "claude duet app marks anthropic s push into ai agent technology",
     "cme ceo hyperliquid faces us market entry hurdles over kyc issues",
     "cme group posts record 469 5 billion in crypto derivatives volume in q3",
+    "coinbase derivatives pauses futures trading for up to nine hours of maintenance",
     "coinbase fined again in ireland this time 3 6m over fund safeguarding",
     "coinbase ireland fined 3 25m after customer fund safeguard lapses",
     "coinbase ireland fined 3 6 million over customer fund segregation oversight failures",
