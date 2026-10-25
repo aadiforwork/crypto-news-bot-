@@ -84,6 +84,7 @@
     "08155ccfbb727d59",
     "0829025257092771",
     "084805714c5372d3",
+    "08717165f732cbfb",
     "08a2272c3a12d309",
     "08cd4a03968dd8fb",
     "08d8aa5cbf4045b2",
@@ -947,6 +948,7 @@
     "7528e18f83fa5912",
     "752f6125659d283f",
     "754437c9152ff53a",
+    "7561007f871efda0",
     "75701d2af3ef50f6",
     "757a72094c7da4f8",
     "75fbe1a959ee56e3",
@@ -1438,6 +1440,7 @@
     "b85675085354cbd4",
     "b879c9ea9c0fdd35",
     "b889d6df28ab25b8",
+    "b88e2a4417892be3",
     "b8d6f2fd2eda02a6",
     "b8feee68606d91a4",
     "b92f5c1fc57946e8",
@@ -1517,6 +1520,7 @@
     "c15dd8935961a044",
     "c186dd2a886f9b4e",
     "c1ac01e4cc005d5c",
+    "c1b0da47199284d9",
     "c1f7bbdc1d97294e",
     "c1fc866db828fab9",
     "c20215f7474be7c2",
@@ -3917,6 +3921,14 @@
       "sinks",
       "trading",
       "weekend"
+    ],
+    [
+      "allaire",
+      "circle",
+      "democrats",
+      "genius",
+      "jeremy",
+      "reverse"
     ]
   ],
   "titles": [
@@ -4056,6 +4068,7 @@
     "china targets 61 896 bitcoin still held by british authorities report",
     "china targets national blockchain network completion by 2030",
     "chinese national extradited to us over alleged cambodian crypto scam network",
+    "circle ceo jeremy allaire says democrats won t reverse the genius act",
     "circle gateway adds cirbtc and eurc to its unified crosschain balances",
     "circle match enables hourly auctions for usdc minting and redemption",
     "circle shareholder sues trump alleging unconstitutional profits from 2b uae crypto deals",
@@ -4100,6 +4113,7 @@
     "dune launches real time onchain trading data feeds for tokenized markets",
     "dwf labs finds bitcoin etf buyers follow trends not set them",
     "economist warns ai sector s financial sustainability in question",
+    "electrum wallet attack hid bitcoin theft behind a fee increase",
     "elon musk agentic ai demand growing faster than anything i ve seen",
     "elon musk supports exploring spacex tesla merger despite challenges",
     "eric schmidt says ai could cut 20 of jobs at large companies",
