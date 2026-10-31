@@ -1,6 +1,7 @@
 {
   "hashes": [
     "003ee35673f340e2",
+    "0040b1ce49d11fbb",
     "0042e1b9a7af4386",
     "0043994aa7b37c79",
     "004c81e5cdff72a8",
@@ -553,6 +554,7 @@
     "1b3e9e27925d8979",
     "1b41c6beb1c1afd8",
     "1b45118ed8dd5a90",
+    "1b5ff23b0548af28",
     "1b778ce2f0f00ed4",
     "1b85b2f681aa4ce8",
     "1b8edc79beefdb40",
@@ -1880,6 +1882,7 @@
     "5b7a5b804c462e9d",
     "5b7bd16b97117f0a",
     "5b7e84db8c6e667a",
+    "5ba58e9bdf676c07",
     "5bb3dd0483fbd313",
     "5bc3ee12f042d700",
     "5bd1da81249fbdd1",
@@ -2141,6 +2144,7 @@
     "689aa4c27de54f5d",
     "68abb62a33c2a5bb",
     "68cd0c73dbd284c0",
+    "68e5eb2b988a144a",
     "68efa2617505df27",
     "68efcb487af6681e",
     "68f21a7892c1aaec",
@@ -9073,12 +9077,18 @@
       "swift",
       "upgrades",
       "urge"
+    ],
+    [
+      "binance",
+      "explode",
+      "inside",
+      "monday",
+      "reports",
+      "reserve",
+      "theories"
     ]
   ],
   "titles": [
-    "anthropic files for nasdaq ipo after 16b revenue surge",
-    "anthropic files for nasdaq ipo eyes major ai market expansion",
-    "anthropic files for nasdaq ipo valuation could surpass 1 2t",
     "anthropic files for nasdaq ipo with valuation target of up to 2 trillion",
     "anthropic files for us ipo amid rapid growth and rising costs",
     "anthropic files ipo prospectus could be valued over 2t reuters",
@@ -9260,6 +9270,7 @@
     "binance hit by 5 8b hack as tether and circle freeze billions",
     "binance holds 165b in crypto reserves nearly 69 of the total across major exchanges",
     "binance hot wallet breach affects 6b customer funds secure",
+    "binance inside job theories explode ahead of monday s reserve reports",
     "binance investigates potential multibillion dollar hack",
     "binance investigating hack as suspicious outflows reach up to 5 8 billion",
     "binance lists 227 futures pairs in 2026 with most tracking traditional assets",
@@ -9543,6 +9554,7 @@
     "cftc sues utah to shield kalshi from state gambling crackdown",
     "cftc sues utah warns kalshi crackdown threatens federal oversight",
     "cftc to host public roundtable on 24 7 derivatives trading on dec 15",
+    "chainalysis discloses cyberattack exposing customer names and emails",
     "chainalysis north korea linked hacks account for nearly 89 of crypto hack losses in 2026",
     "chainalysis traces north korean crypto cash outs through garantex",
     "chainlink adds 19 integrations across five services and seven chains",
@@ -10717,6 +10729,7 @@
     "south korea weighs fourth delay of crypto gains tax eyes 2029 start report",
     "south korea weighs fourth delay of crypto tax with 2029 start tied to u s data sharing",
     "south korea weighs fourth delay on its crypto gains tax pushing it to 2029",
+    "spacex and tesla form committees to evaluate potential merger",
     "spacex and tesla form committees to explore potential merger",
     "spacex closes 40 billion in debt financing to buy gpus",
     "spacex filing gives elon musk the final word on tesla merger he says he s staying out of",
