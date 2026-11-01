@@ -9388,12 +9388,17 @@
       "ranked",
       "stolen",
       "value"
+    ],
+    [
+      "etfs",
+      "ethereum",
+      "outflow",
+      "record",
+      "spot",
+      "streak"
     ]
   ],
   "titles": [
-    "anthropic to release s 1 ipo filing at 9 am est",
-    "anthropic token use on openrouter jumps about 3 5x as cheaper models land",
-    "anthropic trains claude to review its own conversations for misuse",
     "anthropic unveils ai reporting tools to boost enterprise transparency",
     "anthropic uses claude to prove security properties in 123 open source libraries",
     "apollo economist warns ai boom may be unsustainable as stocks tumble",
@@ -10647,6 +10652,7 @@
     "nvidia may provide billions in credit for 45b anthropic deal the information",
     "nvidia releases nemotron 3 5 asr a free open weight model for 40 language audio transcription",
     "nvidia s 500b ai financing faces pressure as coreweave shows financial strain",
+    "nvidia s ai agents now steer the allen telescope array in the search for alien signals",
     "nvidia s vera rubin nvl72 trains models with 75 fewer gpus than grace blackwell",
     "nvidia unveils dsx pod server racks to speed up ai factory buildouts",
     "nvidia unveils minerva for end to end observability in ai factories",
@@ -11214,6 +11220,7 @@
     "trump s 8b diesel aid for farmers delayed until january",
     "trump says doj has frozen nearly 1 billion in scam linked crypto",
     "trump says he will review record 6 3 billion binance hack",
+    "trump speaks on 6 3b binance hack as fbi confirms north korea",
     "trump sued by circle shareholder over 2 billion in uae crypto money",
     "trump urges mississippi voters to reject democrat colom in senate race",
     "trust wallet opens early access for perpetual futures traders",
@@ -11283,6 +11290,7 @@
     "us secretary of war fires general sylvia amid classified info leak probe",
     "us senator probes tether after reported deal with ex trump crypto adviser",
     "us spot bitcoin etfs end two week losing streak with 301m inflow",
+    "us spot ethereum etfs log record 23 day net outflow streak",
     "us spot xrp etfs see 4 25 million in weekly inflows after brief outflow",
     "us treasury bitcoin buy odds hit 21 on kalshi but few are betting",
     "us treasury proposes rules to block american investments in ai and semiconductors",
