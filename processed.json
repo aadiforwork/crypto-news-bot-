@@ -2308,6 +2308,7 @@
     "6f1a702f382b9213",
     "6f3967cf5fdd93b4",
     "6f4d8a02954c715b",
+    "6f687510966de8e9",
     "6f68fcac6687cce4",
     "6f78d631ca3fc502",
     "6f7bd27b0e9fad69",
@@ -9425,11 +9426,21 @@
       "picks",
       "reopenings",
       "withdrawal"
+    ],
+    [
+      "addresses",
+      "binance",
+      "proof",
+      "reserves",
+      "route",
+      "through",
+      "updates",
+      "wallets",
+      "will",
+      "withdrawals"
     ]
   ],
   "titles": [
-    "applied digital insiders buy roughly 7m in shares as stock slides more than 30",
-    "aptos advisor leaves post moves meme fueled campaign to meta stock",
     "aptos introduces three layers of confidentiality on mainnet",
     "arbistar ponzi scheme wallets moved over 1 1b in bitcoin after collapse report",
     "arbitrum active addresses reach 571 767 before retreating",
@@ -9560,6 +9571,7 @@
     "binance starts shopping for stolen coins as ethena ships 24m in ena",
     "binance targets withdrawal restart within 34 hours after 6 3b hack plans reserves report monday",
     "binance uncovers wider breach in 6 3 billion exploit targets sunday withdrawal restart",
+    "binance updates proof of reserves addresses will route all withdrawals through new wallets",
     "binance wallets see 2 5b outflow across five blockchains amid hack suspicions",
     "binance wallets see 5 6b outflow across three blockchains amid hack suspicions",
     "binance working with fbi to recover assets following 6 3b hack",
@@ -10538,6 +10550,7 @@
     "michael burry backs ken griffin s warning that gpu prices could crash",
     "michael burry warns anthropic ipo filing reveals ai industry s vulnerabilities",
     "michael saylor backs binance s pledge to repay users after record breach",
+    "michael saylor says strategy can thrive without bitcoin or equity",
     "michael saylor sees stronger crypto security after binance s 6 3 billion hack",
     "michigan democrat endorses gop s mike rogers in senate race",
     "micron outlines memory and storage roadmap through 2030",
