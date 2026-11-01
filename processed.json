@@ -637,6 +637,7 @@
     "1e44cb5663030095",
     "1e4cc911c40d77d8",
     "1e7a2ce87bbce21b",
+    "1e89b34c20d832e9",
     "1e8c26ed67637dc9",
     "1e987950bbce79c2",
     "1e9935fbcb412f21",
@@ -2277,6 +2278,7 @@
     "6bfb203b20771c72",
     "6c07b6451d89253a",
     "6c289f0093ce4e37",
+    "6c325203bb05d309",
     "6c35b6b85fd411a1",
     "6c38dd591d0d8f0c",
     "6c643e3a5704d298",
@@ -3438,6 +3440,7 @@
     "a59a01281dbae02a",
     "a5ab9d52921b8c24",
     "a5ad89ac7940b9f8",
+    "a5addacedd912b57",
     "a5ae937d6f85f09c",
     "a5b707a11e0f1d38",
     "a5c5ee181d01ecb1",
@@ -9616,10 +9619,19 @@
       "hack",
       "halting",
       "praises"
+    ],
+    [
+      "binance",
+      "crypto",
+      "deepens",
+      "falls",
+      "hack",
+      "market",
+      "rout",
+      "weekly"
     ]
   ],
   "titles": [
-    "bank of england opens consultation on tokenized collateral for clearing",
     "bank of israel rejects netanyahu s crypto sanction evasion plan",
     "bank of korea official forecasts rise in chip output next year",
     "bank of korea wants stablecoins written into forex law as crypto bill and tax fight come to a head",
@@ -10154,6 +10166,7 @@
     "crypto under weekend pressure bitcoin slides below 80 000 on u s middle east evacuations",
     "crypto vc investment falls to 4 5 billion in q3 2026 as late stage deals cool",
     "crypto wallet maker keystone to destroy almost 19 000 devices after security breach",
+    "crypto weekly binance hack deepens crypto rout as market cap falls to 2 7t",
     "cryptoquant ceo calls rising bitcoin hashrate indirect bullish signal from institutions",
     "cryptoquant launches mcp server to plug on chain data into ai models",
     "culper research shorts cerebras alleging its wafer scale chips last only 1 5 to 2 5 years",
