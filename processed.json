@@ -1623,6 +1623,7 @@
     "4229b68d8c8f0066",
     "422dfd069ee885c7",
     "4240bdcf82d81f95",
+    "4249a7cd32b08a5e",
     "426055d68c8daf4c",
     "427c7168b8ffa852",
     "4288a7dc45a44fec",
@@ -11779,7 +11780,6 @@
     ]
   ],
   "titles": [
-    "corning s optical business jumps 44 as ai data centers demand more fiber",
     "corruption allegations against collins impact maine senate race",
     "corruption emerges as key issue for 2026 us midterms ft",
     "cowboy space corporation unveils big iron a rocket that becomes an orbital data center",
@@ -13594,6 +13594,7 @@
     "upcoming core pce price index m m high impact usd",
     "upcoming fomc press conference high impact usd",
     "upcoming fomc statement high impact usd",
+    "upcoming non farm employment change high impact usd",
     "upcoming unemployment rate high impact usd",
     "uptop boosts cleveland cavaliers fan engagement with 21 spend lift",
     "us ai data center projects face delays rising costs amid grid issues",
@@ -13786,6 +13787,7 @@
     "FOMC Press Conference_2026-10-28T18:30:00+00:00": "2026-10-27T18:41:00.110749+00:00",
     "Advance GDP q/q_2026-10-29T12:30:00+00:00": "2026-10-28T12:43:47.648433+00:00",
     "Core PCE Price Index m/m_2026-10-29T12:30:00+00:00": "2026-10-28T12:43:49.654379+00:00",
-    "Unemployment Rate_2026-11-06T13:30:00+00:00": "2026-11-05T19:00:17.526164+00:00"
+    "Unemployment Rate_2026-11-06T13:30:00+00:00": "2026-11-05T19:00:17.526164+00:00",
+    "Non-Farm Employment Change_2026-11-06T13:30:00+00:00": "2026-11-06T00:04:31.334928+00:00"
   }
 }
