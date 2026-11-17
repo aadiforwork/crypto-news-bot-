@@ -4168,6 +4168,7 @@
     "96697bd5a731d72f",
     "966c196096c951ec",
     "96799317e948ee3e",
+    "967c2b975c177590",
     "96948ba7de221d9c",
     "96958542ec1641b8",
     "96964a908fe099c0",
@@ -14240,7 +14241,6 @@
     ]
   ],
   "titles": [
-    "hyperliquid leapfrogs bybit kraken and okx in open interest as q3 positions grow 80",
     "hyperliquid market orders of up to 20m moved papertrade prices at launch",
     "hyperliquid poised to lead perpetual futures market says hypestrat ceo",
     "hyperliquid rise rattles crypto industry draws white house attention",
@@ -15975,6 +15975,7 @@
     "upcoming fomc press conference high impact usd",
     "upcoming fomc statement high impact usd",
     "upcoming non farm employment change high impact usd",
+    "upcoming retail sales m m high impact usd",
     "upcoming unemployment rate high impact usd",
     "uptop boosts cleveland cavaliers fan engagement with 21 spend lift",
     "us 401 k proposal leaves door open to altcoins but hurdles remain",
@@ -16251,6 +16252,7 @@
     "Non-Farm Employment Change_2026-11-06T13:30:00+00:00": "2026-11-06T00:04:31.334928+00:00",
     "Core CPI m/m_2026-11-10T13:30:00+00:00": "2026-11-09T20:45:45.027807+00:00",
     "CPI m/m_2026-11-10T13:30:00+00:00": "2026-11-10T10:59:26.002591+00:00",
-    "Core Retail Sales m/m_2026-11-17T13:30:00+00:00": "2026-11-16T17:02:15.308862+00:00"
+    "Core Retail Sales m/m_2026-11-17T13:30:00+00:00": "2026-11-16T17:02:15.308862+00:00",
+    "Retail Sales m/m_2026-11-17T13:30:00+00:00": "2026-11-17T00:48:15.056702+00:00"
   }
 }
