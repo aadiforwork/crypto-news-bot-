@@ -2846,6 +2846,7 @@
     "64882f8b0d1ccc1f",
     "64883d50a1cc60b5",
     "648c986ba5e4b728",
+    "6494054ec0e0b762",
     "649cf465da630bb3",
     "64a00ae1b96fda5b",
     "64acb39ab5f95181",
@@ -5111,6 +5112,7 @@
     "b8860a1b4900a241",
     "b889d6df28ab25b8",
     "b88b351dbfe64b88",
+    "b88cb456aeed4718",
     "b88e2a4417892be3",
     "b8ac0b4a45e1a16b",
     "b8af8760dbf3e224",
@@ -6162,6 +6164,7 @@
     "dddcfc6bd603abd6",
     "dddf0f4fc3b79d33",
     "ddee67ebd10e88a9",
+    "ddf216d29318b4cc",
     "ddf427dd96db4693",
     "ddf871f2e1b351c0",
     "ddfa1284412b7daf",
@@ -14361,9 +14364,6 @@
     ]
   ],
   "titles": [
-    "icrc delivers medical supplies to besieged taiz amid ongoing yemen conflict",
-    "illinois crypto tax is impossible to enforce as written crypto industry tells court",
-    "imf warns of slowing asia factory activity amid ai demand correction",
     "independent dan osborn gains ground in nebraska s 2026 senate race",
     "india plans indigenous gpu chips within 24 months says meity secretary",
     "india s coindcx confirms 16 million loss days after ceo called it a false alarm",
@@ -14455,6 +14455,7 @@
     "jason calacanis tells investors to sell bitcoin predicts a slide to 57 000",
     "jason furman says he would pick ai over a staff of economists at the cea",
     "jensen huang in talks for nvidia ceo return with silicon valley support ft",
+    "jensen huang open to nvidia return amid leadership transition and talent concerns",
     "jensen huang resigns as nvidia ceo colette kress named interim chief",
     "jensen huang resigns as nvidia ceo exits board shares plunge",
     "jensen huang resigns as nvidia ceo with cfo colette kress named interim chief",
@@ -14958,6 +14959,7 @@
     "nvidia board backs jensen huang as independent review of foreign intelligence claims begins",
     "nvidia board investigates ceo jensen huang over espionage allegations",
     "nvidia board investigates jensen huang after report he was target of chinese spy effort",
+    "nvidia board rejects huang comeback despite record 116b quarter",
     "nvidia broadcom micron seen as key buys post semiconductor sell off",
     "nvidia ceo apologizes pledges to protect us national security amid probe",
     "nvidia ceo huang quits company he co founded led for 3 decades shares slump",
@@ -16088,6 +16090,7 @@
     "upcoming core pce price index m m high impact usd",
     "upcoming core retail sales m m high impact usd",
     "upcoming cpi m m high impact usd",
+    "upcoming fomc meeting minutes high impact usd",
     "upcoming fomc press conference high impact usd",
     "upcoming fomc statement high impact usd",
     "upcoming non farm employment change high impact usd",
@@ -16373,6 +16376,7 @@
     "Core CPI m/m_2026-11-10T13:30:00+00:00": "2026-11-09T20:45:45.027807+00:00",
     "CPI m/m_2026-11-10T13:30:00+00:00": "2026-11-10T10:59:26.002591+00:00",
     "Core Retail Sales m/m_2026-11-17T13:30:00+00:00": "2026-11-16T17:02:15.308862+00:00",
-    "Retail Sales m/m_2026-11-17T13:30:00+00:00": "2026-11-17T00:48:15.056702+00:00"
+    "Retail Sales m/m_2026-11-17T13:30:00+00:00": "2026-11-17T00:48:15.056702+00:00",
+    "FOMC Meeting Minutes_2026-11-18T19:00:00+00:00": "2026-11-18T01:00:02.253462+00:00"
   }
 }
