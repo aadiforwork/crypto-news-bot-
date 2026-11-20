@@ -1769,11 +1769,12 @@ def run_test_alert() -> None:
     print("=" * 60)
 
     # Test message CHANNEL pe nahi jayega: website news channel se fetch karti hai,
-    # isliye wahan test post dikhna nahi chahiye. Sirf private chat ids (jo "-" se
-    # start nahi hote) ko bhejte hain.
+    # isliye wahan test post dikhna nahi chahiye. Channel do shakal me aata hai --
+    # numeric id ("-100...") aur username ("@AlgoSubsNews") -- dono chhodte hain.
+    # Sirf private chat ids (sirf ginti) ko bhejte hain.
     test_targets = [
         t.strip() for t in str(TELEGRAM_CHAT_ID).split(",")
-        if t.strip() and not t.strip().startswith("-")
+        if t.strip() and not t.strip().startswith("-") and not t.strip().startswith("@")
     ]
     if test_targets:
         tg_ok = send_telegram_message(text, targets=test_targets)
